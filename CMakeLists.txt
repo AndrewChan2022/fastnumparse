@@ -1,19 +1,39 @@
 cmake_minimum_required(VERSION 3.15...4.4)
 
-project(${SKBUILD_PROJECT_NAME} VERSION ${SKBUILD_PROJECT_VERSION} LANGUAGES CXX)
+set(FASTNUMPARSE_PROJECT_NAME "fastnumparse")
+set(FASTNUMPARSE_PROJECT_VERSION "0.1.0")
+
+# scikit-build-core defines these variables when building a Python package.
+# Keep standalone CMake configuration usable for IDEs and local development.
+if(DEFINED SKBUILD_PROJECT_NAME)
+    set(FASTNUMPARSE_PROJECT_NAME "${SKBUILD_PROJECT_NAME}")
+endif()
+if(DEFINED SKBUILD_PROJECT_VERSION)
+    set(FASTNUMPARSE_PROJECT_VERSION "${SKBUILD_PROJECT_VERSION}")
+endif()
+
+project(
+    ${FASTNUMPARSE_PROJECT_NAME}
+    VERSION ${FASTNUMPARSE_PROJECT_VERSION}
+    LANGUAGES CXX
+)
 
 set(PYBIND11_FINDPYTHON ON)
-find_package(pybind11 CONFIG REQUIRED)
+add_subdirectory(dep/fast_float EXCLUDE_FROM_ALL)
+add_subdirectory(dep/nanothread EXCLUDE_FROM_ALL)
+add_subdirectory(dep/pybind11/2.13.6 EXCLUDE_FROM_ALL)
 
-pybind11_add_module(_core MODULE src/fastnumparse/_core.cpp)
+pybind11_add_module(
+    _core
+    MODULE
+    src/fastnumparse/_core.cpp
+    src/fastnumparse/fastnumparse.cpp
+)
 target_compile_features(_core PRIVATE cxx_std_17)
 target_compile_definitions(
     _core
-    PRIVATE FASTNUMPARSE_VERSION="${SKBUILD_PROJECT_VERSION}"
+    PRIVATE FASTNUMPARSE_VERSION="${PROJECT_VERSION}"
 )
-
-add_subdirectory(${DEPENDENCY_DIR}/fast_float)
-add_subdirectory(${DEPENDENCY_DIR}/nanothread)
-add_subdirectory(${DEPENDENCY_DIR}/pybind11/2.13.6)
+target_link_libraries(_core PRIVATE fast_float nanothread)
 
 install(TARGETS _core LIBRARY DESTINATION fastnumparse)

@@ -45,7 +45,7 @@ endif()
 #  Build defaults for projects by the Realistic Graphics Lab
 # ----------------------------------------------------------
 
-include(ext/cmake-defaults/CMakeLists.txt)
+# include(ext/cmake-defaults/CMakeLists.txt)
 
 # ----------------------------------------------------------
 #  Compile the nanothread library

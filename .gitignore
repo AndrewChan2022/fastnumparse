@@ -13,6 +13,7 @@ Thumbs.db
 # external/*
 
 /build/*
+/buildvs/*
 /build2/*
 /build_debug/*
 /build_release/*
