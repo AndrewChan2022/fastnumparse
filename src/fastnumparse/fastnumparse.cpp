@@ -1,3 +1,6 @@
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 #include <fast_float/fast_float.h>
 #include <nanothread/nanothread.h>
 
@@ -10,6 +13,8 @@
 #include <vector>
 #include <array>
 #include <charconv>
+
+namespace py = pybind11;
 
 namespace fastnumparse {
 
@@ -56,6 +61,16 @@ public:
     }
 
     explicit FastLineReader(const char* buffer, const size_t len) {
+        if (buffer == nullptr && len != 0) {
+            throw std::invalid_argument(
+                "buffer must not be null when len is nonzero");
+        }
+
+        // Borrow the caller's memory. It must remain alive while this reader
+        // is in use.
+        // no extra \0 needed
+        cur_ = buffer != nullptr ? buffer : "";
+        end_ = cur_ + len;
     }
 
     // Zero-copy access (FASTEST)
@@ -380,6 +395,67 @@ static size_t parse_dynamic_char(const std::string_view& line, std::vector<char>
     }
 
     return count;
+}
+
+template<typename T>
+static py::array parse_fix_column_buffer_as() {
+
+}
+
+// return new position
+// delimiter must be space
+py::array parse_fix_column_buffer(
+    py::buffer input,
+    std::size_t offset,
+    py::object dtypeArg,
+    const std::string& comment,
+    std::size_t maxRows,
+    std::size_t columnCount,
+    std::int32_t ndmin
+) {
+    const py::buffer_info info = input.request();
+
+    // This parser expects a contiguous byte buffer.
+    if (info.ndim != 1 || info.itemsize != 1 || info.strides[0] != 1) {
+        throw py::value_error(
+            "buffer must be a contiguous one-dimensional byte buffer");
+    }
+
+    const auto buffer_size = static_cast<std::size_t>(info.size);
+
+    if (offset > buffer_size) {
+        throw py::value_error("offset exceeds buffer size");
+    }
+
+    const auto* buffer = static_cast<const char*>(info.ptr);
+    const char* begin = buffer + offset;
+    const std::size_t length = buffer_size - offset;
+
+    FastLineReader reader(begin, length);
+
+    const py::dtype dtype = py::dtype::from_args(dtypeArg);
+
+    if (dtype.is(py::dtype::of<double>())) {
+        return parse_fix_column_buffer_as<double>(
+            reader, comment, maxRows, columnCount, ndmin);
+    }
+
+    if (dtype.is(py::dtype::of<float>())) {
+        return parse_fix_column_buffer_as<float>(
+            reader, comment, maxRows, columnCount, ndmin);
+    }
+
+    if (dtype.is(py::dtype::of<std::int64_t>())) {
+        return parse_fix_column_buffer_as<std::int64_t>(
+            reader, comment, maxRows, columnCount, ndmin);
+    }
+
+    if (dtype.is(py::dtype::of<std::int32_t>())) {
+        return parse_fix_column_buffer_as<std::int32_t>(
+            reader, comment, maxRows, columnCount, ndmin);
+    }
+
+    throw py::type_error("unsupported dtype");
 }
 
 
