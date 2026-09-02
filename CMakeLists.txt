@@ -24,16 +24,16 @@ add_subdirectory(dep/nanothread EXCLUDE_FROM_ALL)
 add_subdirectory(dep/pybind11/2.13.6 EXCLUDE_FROM_ALL)
 
 pybind11_add_module(
-    fastnumparse
+    _fastnumparse
     MODULE
     src/fastnumparse/bindings.cpp
     src/fastnumparse/fastnumparse.cpp
 )
-target_compile_features(fastnumparse PRIVATE cxx_std_17)
+target_compile_features(_fastnumparse PRIVATE cxx_std_17)
 target_compile_definitions(
-    fastnumparse
+    _fastnumparse
     PRIVATE FASTNUMPARSE_VERSION="${PROJECT_VERSION}"
 )
-target_link_libraries(fastnumparse PRIVATE fast_float nanothread)
+target_link_libraries(_fastnumparse PRIVATE fast_float nanothread)
 
-install(TARGETS fastnumparse LIBRARY DESTINATION fastnumparse)
+install(TARGETS _fastnumparse LIBRARY DESTINATION fastnumparse)

@@ -10,7 +10,7 @@
 #include <vector>
 
 
-namespace fnp {
+namespace fastnumparse {
 
 
 /// 10x faster line reader relative to std::getline

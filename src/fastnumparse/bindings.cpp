@@ -2,7 +2,7 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(fastnumparse, module) {
+PYBIND11_MODULE(_fastnumparse, module) {
     module.doc() = "Native implementation for fastnumparse";
     module.def(
         "_native_version",
