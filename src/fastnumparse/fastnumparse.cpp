@@ -56,8 +56,9 @@ public:
         buffer_[file_size_] = '\0';
         inFile.close();
 
-        cur_ = buffer_.data();
-        end_ = buffer_.data() + file_size_;
+        begin_ = buffer_.data();
+        cur_ = begin_;
+        end_ = begin_ + file_size_;
     }
 
     explicit FastLineReader(const char* buffer, const size_t len) {
@@ -69,8 +70,17 @@ public:
         // Borrow the caller's memory. It must remain alive while this reader
         // is in use.
         // no extra \0 needed
-        cur_ = buffer != nullptr ? buffer : "";
-        end_ = cur_ + len;
+        begin_ = buffer != nullptr ? buffer : "";
+        cur_ = begin_;
+        end_ = begin_ + len;
+    }
+
+    void set_position(const std::size_t offset) {
+        const auto length = static_cast<std::size_t>(end_ - begin_);
+        if (offset > length) {
+            throw std::out_of_range("offset exceeds buffer size");
+        }
+        cur_ = begin_ + offset;
     }
 
     // Zero-copy access (FASTEST)
@@ -122,6 +132,7 @@ public:
 private:
     std::ifstream inFile_;
     std::vector<char> buffer_;
+    const char* begin_ = nullptr;   // beginning of the full buffer
     const char* cur_ = nullptr;     // cursor
     const char* end_ = nullptr;     // end of buffer
     std::streamsize file_size_ = 0;
