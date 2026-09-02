@@ -1,0 +1,62 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.10",
+    "pybind11>=2.13",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "fastnumparse"
+version = "0.1.0"
+description = "Fast number parsing for NumPy, powered by C++."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "AndrewChan2022" },
+]
+keywords = ["numpy", "number-parsing", "parser"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: C++",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2.2",
+    "cibuildwheel>=2.21",
+    "mypy>=1.11",
+    "pytest>=8",
+    "twine>=6",
+]
+
+[project.urls]
+Homepage = "https://github.com/AndrewChan2022/fastnumparse"
+Repository = "https://github.com/AndrewChan2022/fastnumparse"
+Issues = "https://github.com/AndrewChan2022/fastnumparse/issues"
+
+[tool.scikit-build]
+wheel.packages = ["src/fastnumparse"]
+wheel.exclude = ["**/*.cpp"]
+build-dir = "build/{wheel_tag}"
+strict-config = true
+
+[tool.cibuildwheel]
+test-command = "pytest {project}/tests"
+test-requires = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]

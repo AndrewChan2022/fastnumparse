@@ -1,0 +1,29 @@
+.vscode/*
+.vscode/
+.vs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.idea/
+.DS_Store
+Thumbs.db
+
+# external/*
+
+/build/*
+/build2/*
+/build_debug/*
+/build_release/*
+/install/*
+/Testing/*
+/data
+/temp
+
+# Python virtual environments and build artifacts
+.venv/
+venv/
+/dist
+*.egg-info/
+/docs/tmp_*
