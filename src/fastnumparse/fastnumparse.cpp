@@ -8,7 +8,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
+#include <array>
+#include <charconv>
 
 namespace fastnumparse {
 
@@ -52,6 +53,9 @@ public:
 
         cur_ = buffer_.data();
         end_ = buffer_.data() + file_size_;
+    }
+
+    explicit FastLineReader(const char* buffer, const size_t len) {
     }
 
     // Zero-copy access (FASTEST)
@@ -107,6 +111,276 @@ private:
     const char* end_ = nullptr;     // end of buffer
     std::streamsize file_size_ = 0;
 };
+
+
+template <typename ParseOneLineFunc>
+static void ParallelParseElement(const std::vector<std::string_view>& lines, const ParseOneLineFunc& parseOneLine) {
+    
+    const size_t nLines =  lines.size();
+
+    // tbb::blocked_range<size_t> r = tbb::blocked_range<size_t>(0, nLines);
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, nLines), [&](const tbb::blocked_range<size_t>& r) 
+    {
+        // std:: cout << "parse range count: " << (r.end() - r.begin()) << "\n";
+        for (size_t i = r.begin(); i != r.end(); ++i) {
+            auto& line = lines[i];
+            parseOneLine(line, i);
+        }
+    });
+}
+
+/// this is 20x faster than std::istringstream method
+/// parallel 4x more faster
+/// totally 80x faster
+static size_t parse_fix_number_floats(const std::string_view& line, std::array<double, 16>& numbers) {
+    const char* begin = line.data();
+    const char* end   = begin + line.size();
+
+    // remove comment
+    if (const char* hash = static_cast<const char*>(memchr(begin, '#', end - begin))) {
+        end = hash;
+    }
+
+    // trim leading spaces
+    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+        ++begin;
+    }
+
+    // trim trailing spaces
+    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+        --end;
+    }
+
+    size_t count = 0;
+    const char* p = begin;
+
+    while (p < end && count < numbers.size()) {
+        // skip spaces between tokens
+        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+            ++p;
+        }
+
+        if (p >= end) break;
+
+        auto r = fast_float::from_chars(p, end, numbers[count]);
+        if (r.ec != std::errc()) {
+            // stop on parse error
+            break;
+        }
+
+        p = r.ptr;
+        ++count;
+    }
+
+    return count;
+};
+
+static size_t parse_fix_number_int32(const std::string_view& line, std::array<int64_t, 16>& numbers) {
+    const char* begin = line.data();
+    const char* end   = begin + line.size();
+
+    // remove comment
+    if (const char* hash = static_cast<const char*>(memchr(begin, '#', end - begin))) {
+        end = hash;
+    }
+
+    // trim leading spaces
+    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+        ++begin;
+    }
+
+    // trim trailing spaces
+    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+        --end;
+    }
+
+    size_t count = 0;
+    const char* p = begin;
+
+    while (p < end && count < numbers.size()) {
+        // skip whitespace
+        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+            ++p;
+        }
+
+        if (p >= end) break;
+
+        int64_t value;
+        auto r = std::from_chars(p, end, value);
+        if (r.ec != std::errc()) {
+            // parse error
+            break;
+        }
+
+        numbers[count++] = value;
+        p = r.ptr;
+    }
+
+    return count;
+}
+
+
+// after remove tailing # comment,  each connected token is counted as one
+static size_t counting_dynamic_number(const std::string_view& line) {
+    const char* begin = line.data();
+    const char* end   = begin + line.size();
+
+    // remove comment
+    if (const char* hash = static_cast<const char*>(memchr(begin, '#', end - begin))) {
+        end = hash;
+    }
+
+    // trim leading spaces
+    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+        ++begin;
+    }
+
+    // trim trailing spaces
+    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+        --end;
+    }
+
+
+    size_t count = 0;
+    bool in_token = false;
+
+    for (const char* p = begin; p < end; ++p) {
+        unsigned char c = static_cast<unsigned char>(*p);
+
+        if (std::isspace(c)) {
+            in_token = false;
+        } else {
+            // only count when entering a new token
+            if (!in_token) {
+                ++count;      // new token starts
+                in_token = true;
+            }
+        }
+    }
+
+    return count;
+}
+
+
+static size_t parse_dynamic_number_int32(const std::string_view& line, std::vector<int64_t>& numbers) {
+    const char* begin = line.data();
+    const char* end   = begin + line.size();
+
+    // remove comment
+    if (const char* hash = static_cast<const char*>(memchr(begin, '#', end - begin))) {
+        end = hash;
+    }
+
+    // trim leading spaces
+    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+        ++begin;
+    }
+
+    // trim trailing spaces
+    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+        --end;
+    }
+
+    size_t count = 0;
+    const char* p = begin;
+
+    while (p < end) {
+        // skip whitespace
+        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+            ++p;
+        }
+
+        if (p >= end) break;
+
+        int64_t value;
+        auto r = std::from_chars(p, end, value);
+        if (r.ec != std::errc()) {
+            // parse error
+            break;
+        }
+
+        numbers.push_back(value);
+        count++;
+        p = r.ptr;
+    }
+
+    return count;
+}
+
+
+// after remove tailing # comment,  each connected token is counted as one
+static size_t counting_dynamic_char(const std::string_view& line) {
+    const char* begin = line.data();
+    const char* end   = begin + line.size();
+
+
+    // remove comment
+    if (const char* hash = static_cast<const char*>(memchr(begin, '#', end - begin))) {
+        end = hash;
+    }
+
+    // trim leading spaces
+    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+        ++begin;
+    }
+
+    // trim trailing spaces
+    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+        --end;
+    }
+
+
+    size_t count = 0;
+    for (const char* p = begin; p < end; ++p) {
+        unsigned char c = static_cast<unsigned char>(*p);
+        if (std::isspace(c)) {
+        } else {
+            ++count;      // new token starts
+        }
+    }
+
+    return count;
+}
+
+
+static size_t parse_dynamic_char(const std::string_view& line, std::vector<char>& numbers) {
+    const char* begin = line.data();
+    const char* end   = begin + line.size();
+
+    // remove comment
+    if (const char* hash = static_cast<const char*>(memchr(begin, '#', end - begin))) {
+        end = hash;
+    }
+
+    // trim leading spaces
+    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+        ++begin;
+    }
+
+    // trim trailing spaces
+    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+        --end;
+    }
+
+    size_t count = 0;
+    const char* p = begin;
+    
+    while (p < end) {
+        // skip whitespace
+        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+            ++p;
+        }
+
+        if (p >= end) break;
+
+        char value = *p;   // <-- THIS is the parse
+        numbers.push_back(value);
+        ++count;
+        ++p;
+    }
+
+    return count;
+}
 
 
 
