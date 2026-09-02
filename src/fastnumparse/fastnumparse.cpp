@@ -442,8 +442,11 @@ static py::array parse_fix_column_buffer_as(
     });
 }
 
+// this like csv data with space delimiter
+// each line fix column number, delimiter must be space
+// may have comment at tail
+// no other things like } at tail
 // return new position
-// delimiter must be space
 py::array parse_fix_column_buffer(
     py::buffer input,
     std::size_t offset,
