@@ -31,6 +31,14 @@ cmake_dependent_option(NANOTHREAD_ENABLE_TRACE
   "Print trace-level debug messages to stderr?" OFF
   "NANOTHREAD_MASTER_PROJECT" OFF)
 
+# This vendored snapshot may contain only the public header.
+if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/nanothread.cpp")
+  add_library(nanothread INTERFACE)
+  target_include_directories(nanothread INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+  return()
+endif()
+
 # ----------------------------------------------------------
 #  Check if submodules have been checked out, or fail early
 # ----------------------------------------------------------

@@ -1,4 +1,5 @@
 #include <fast_float/fast_float.h>
+#include <nanothread/nanothread.h>
 
 #include <cstddef>
 #include <fstream>

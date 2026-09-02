@@ -2,7 +2,7 @@
 
 from importlib.metadata import version
 
-from ._core import _native_version
+from .fastnumparse import _native_version
 
 __version__ = version("fastnumparse")
 
