@@ -1,0 +1,652 @@
+/*
+    nanothread/nanothread.h -- Simple thread pool with a task-based API
+
+    Copyright (c) 2021 Wenzel Jakob <wenzel.jakob@epfl.ch>
+
+    All rights reserved. Use of this source code is governed by a BSD-style
+    license that can be found in the LICENSE file.
+*/
+
+#pragma once
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+
+#if defined(__cplusplus)
+#  include <type_traits>
+#else
+#  include <stdbool.h>
+#endif
+
+#if defined(NANOTHREAD_STATIC)
+#  define NANOTHREAD_EXPORT
+#else
+#  if defined(_MSC_VER)
+#    if defined(NANOTHREAD_BUILD)
+#      define NANOTHREAD_EXPORT    __declspec(dllexport)
+#    else
+#      define NANOTHREAD_EXPORT    __declspec(dllimport)
+#    endif
+#  else
+#    define NANOTHREAD_EXPORT      __attribute__ ((visibility("default")))
+#  endif
+#endif
+
+#if defined(__cplusplus)
+#  define NANOTHREAD_DEF(x) = x
+#else
+#  define NANOTHREAD_DEF(x)
+#endif
+
+#define NANOTHREAD_AUTO ((uint32_t) -1)
+
+typedef struct Pool Pool;
+typedef struct Task Task;
+
+#if defined(__cplusplus)
+#define NANOTHREAD_THROW     noexcept(false)
+extern "C" {
+#else
+#define NANOTHREAD_THROW
+#endif
+
+/**
+ * \brief Create a new thread pool
+ *
+ * \param size
+ *     Specifies the desired number of threads available for parallel
+ *     work, including the calling thread (which also participates in
+ *     execution inside \ref task_wait()). The default value of
+ *     \c NANOTHREAD_AUTO uses \ref performance_core_count(). Passing
+ *     \c size = 0 or \c size = 1 disables worker threads entirely; the
+ *     calling thread then performs all parallel work during
+ *     \ref task_wait(). Otherwise, \c size - 1 worker threads are spawned.
+ *
+ * \param ftz
+ *     Should denormalized floating point numbers be flushed to zero?
+ *     The pool workers will initialize their floating point control
+ *     registers accordingly.
+ */
+extern NANOTHREAD_EXPORT Pool *
+pool_create(uint32_t size NANOTHREAD_DEF(NANOTHREAD_AUTO),
+            int ftz NANOTHREAD_DEF(1));
+
+/**
+ * \brief Destroy the thread pool and discard remaining unfinished work.
+ *
+ * It is undefined behavior to destroy the thread pool while other threads
+ * are waiting for the completion of scheduled work via \ref task_wait().
+ *
+ * \param pool
+ *     The thread pool to destroy. \c nullptr refers to the default pool.
+ */
+extern NANOTHREAD_EXPORT void pool_destroy(Pool *pool NANOTHREAD_DEF(0));
+
+/// Returns the number of available CPU cores.
+extern NANOTHREAD_EXPORT uint32_t core_count();
+
+/**
+ * \brief Returns the number of performance cores available to the process.
+ *
+ * Some processors split their cores into performance-oriented and
+ * efficiency-oriented groups. This function reports the size of the
+ * performance group; on processors without such a split, it is
+ * equivalent to \ref core_count().
+ *
+ * The default thread pool size is derived from this value: using the
+ * efficiency cores tends to be a net loss, since the slower efficiency
+ * cores become stragglers that delay barrier-synchronized parallel
+ * regions.
+ */
+extern NANOTHREAD_EXPORT uint32_t performance_core_count();
+
+/**
+ * \brief Return the number of threads available for parallel work.
+ *
+ * The returned count includes the calling thread, which participates
+ * in task execution inside \ref task_wait(). A return value of 1 means
+ * that no worker threads have been spawned and all parallel work runs
+ * on the calling thread.
+ *
+ * \param pool
+ *     The thread pool to query. \c nullptr refers to the default pool.
+ */
+extern NANOTHREAD_EXPORT uint32_t pool_size(Pool *pool NANOTHREAD_DEF(0));
+
+/**
+ * \brief Resize the thread pool.
+ *
+ * The \c size parameter counts the calling thread, which participates
+ * in task execution inside \ref task_wait(). Passing \c size = 0 or
+ * \c size = 1 disables worker threads entirely. Otherwise, \c size - 1
+ * worker threads are spawned.
+ *
+ * \param pool
+ *     The thread pool to resize. \c nullptr refers to the default pool.
+ *
+ * \param start_parked
+ *     Controls whether the worker threads added by this call go to sleep
+ *     immediately. This avoids a startup CPU/power spike when an application
+ *     starts and does not have any parallel work yet. Only relevant when
+ *     growing the pool.
+ */
+extern NANOTHREAD_EXPORT void pool_set_size(Pool *pool, uint32_t size,
+                                            int start_parked NANOTHREAD_DEF(1));
+
+/**
+ * \brief Enable/disable time profiling
+ *
+ * Profiling must be enabled to use the \ref task_time() function.
+ *
+ * \param value
+ *     A nonzero value indicates that profiling should be enabled.
+ */
+extern NANOTHREAD_EXPORT void pool_set_profile(int value);
+
+/// Check whether time profiling is enabled (global setting)
+extern NANOTHREAD_EXPORT int pool_profile();
+
+/**
+ * \brief Return a unique number identifying the current worker thread
+ *
+ * When called from a thread pool worker (e.g. while executing a parallel
+ * task), this function returns a unique identifying number between 1 and the
+ * pool's total thread count.
+ *
+ * The IDs of separate thread pools overlap. When the current thread is not a
+ * thread pool worker, the function returns zero.
+ */
+extern NANOTHREAD_EXPORT uint32_t pool_thread_id();
+
+/** \brief Process work available within the pool until a stopping criterion is
+ * satisified.
+ *
+ * This function repeatedly fetches work from ``pool`` until the stopping
+ * criterion ``stopping_criterion(payload)`` evaluates to ``true``, at which
+ * point the function returns.
+ *
+ * It provides a way for an ordinary thread to temporarily join the thread
+ * pool. A function being called by a worker thread that needs to wait for an
+ * event to take place can also call this function to avoid starvation issues.
+ */
+extern NANOTHREAD_EXPORT void
+pool_work_until(Pool *pool, bool (*stopping_criterion)(void *), void *payload);
+
+/*
+ * \brief Submit a new task to a thread pool
+ *
+ * This function submits a new task consisting of \c size work units to the
+ * thread pool \c pool.
+ *
+ * <b>Callback</b>: The task callback \c func will be invoked \c size times by
+ * the various thread pool workers. Its first argument will range from
+ * <tt>0</tt> to \c <tt>size - 1</tt>, and the second argument refers to a
+ * payload memory region specified via the \c payload parameter.
+ *
+ * <b>Parents</bb>: The \c parent and \c parent_count parameters can be used to
+ * specify parent tasks that must be completed before execution of this task
+ * can commence. If the task does not depend on any other tasks (e.g.
+ * <tt>parent_count == 0</tt> and <tt>parent == nullptr</tt>), or when all of
+ * those other tasks have already finished executing, then it will be
+ * immediately appended to the end of the task queue. Otherwise, the task will
+ * be scheduled once all parent tasks have finished executing.
+ *
+ * <b>Payload storage</b>: The callback payload is handled using one of two
+ * possible modes:
+ *
+ * <ol>
+ *    <li>When <tt>size == 0</tt> or <tt>payload_deleter != nullptr</tt>, the
+ *    value of the \c payload parameter is simply forwarded to the callback \c
+ *    func. In the latter case, <tt>payload_deleter(payload)</tt> is invoked
+ *    following completion of the task, which can carry out additional cleanup
+ *    operations if needed. In both cases, the memory region targeted by \c
+ *    payload may be accessed asynchronously and must remain valid until the
+ *    task is done.</li>
+ *
+ *    <li>Otherwise, the function will internally create a copy of the payload
+ *    and free it following completion of the task. In this case, it is fine to
+ *    delete the the memory region targeted by \c payload right after the
+ *    function call.</li>
+ * </ol>
+ *
+ * The function returns a task handle that can be used to schedule other
+ * dependent tasks, and to wait for task completion if desired. This handle
+ * must eventually be released using \ref task_release() or \ref
+ * task_wait_and_release(). A failure to do so will result in memory leaks.
+ *
+ * <b>Small task optimization</b>: If desired, small tasks can be executed
+ * right away without using the thread pool. This happens under the following
+ * conditions:
+ *
+ * <ol>
+ *   <li>The task is "small" (\c size == 1).</li>
+ *   <li>The task does not depend on any parent tasks.</li>
+ *   <li>The \c always_async parameter is set to 0</li>
+ * </ol>
+ *
+ * \remark
+ *     Barriers and similar dependency relations can be encoded by via
+ *     artificial tasks using <tt>size == 0</tt> and <tt>func == nullptr<tt>
+ *     along with a set of parent tasks.
+ *
+ * \param pool
+ *     The thread pool that should execute the specified task. \c nullptr
+ *     refers to the default pool.
+ *
+ * \param parent
+ *     List of parents of size \c parent_count. \c nullptr-valued elements
+ *     are ignored
+ *
+ * \param parent_count
+ *     Number of parent tasks
+ *
+ * \param size
+ *     Total number of work units; the callback \c func will be called this
+ *     many times if provided.
+ *
+ * \param func
+ *     Callback function that will be invoked to perform the actual computation.
+ *     If set to \c nullptr, the callback is ignored. This can be used to create
+ *     artificial tasks that only encode dependencies.
+ *
+ * \param payload
+ *     Optional payload that is passed to the function \c func
+ *
+ * \param payload_size
+ *     When \c payload_deleter is equal to \c nullptr and when \c size is
+ *     nonzero, a temporary copy of the payload will be made. This parameter is
+ *     necessary to specify the payload size in that case.
+ *
+ * \param payload_deleter
+ *     Optional callback that will be invoked to free the payload
+ *
+ * \param always_async
+ *     If set to a nonzero value, execution will always happen asynchronously,
+ *     even in cases where the task being scheduled has no parents, and
+ *     when only encodes a small amount of work (\c size == 1). Otherwise
+ *     it will be executed synchronously, and the function will return \c nullptr.
+ *
+ * \param profile
+ *     If set to a nonzero value, nanothread will keep track of the start and
+ *     end time of the task. This behavior will also be enabled if
+ *     \ref pool_set_profile() is used to enable profiling globally.
+ *
+ *
+ * \return
+ *     A task handle that must eventually be released via \ref task_release()
+ *     or \ref task_wait_and_release(). The function returns \c nullptr when
+ *     no task was generated (e.g. when there are no parent tasks, and either
+ *     <tt>size==0</tt>, or when <tt>size==1</tt> and the task was executed
+ *     synchronously.)
+ */
+extern NANOTHREAD_EXPORT
+Task *task_submit_dep(Pool *pool,
+                      const Task * const *parent,
+                      uint32_t parent_count,
+                      uint32_t size NANOTHREAD_DEF(1),
+                      void (*func)(uint32_t, void *) NANOTHREAD_DEF(0),
+                      void *payload NANOTHREAD_DEF(0),
+                      uint32_t payload_size NANOTHREAD_DEF(0),
+                      void (*payload_deleter)(void *) NANOTHREAD_DEF(0),
+                      int always_async NANOTHREAD_DEF(0),
+                      int profile NANOTHREAD_DEF(0));
+
+/*
+ * \brief Release a task handle so that it can eventually be reused
+ *
+ * Releasing a task handle does not impact the tasks's execution, which could
+ * be in one of three states: waiting, running, or complete. This operation is
+ * important because it frees internal resources that would otherwise leak.
+ *
+ * Following a call to \ref task_release(), the associated task can no
+ * longer be used as a direct parent of other tasks, and it is no longer
+ * possible to wait for its completion using an operation like \ref
+ * task_wait().
+ *
+ * \param task
+ *     The task in question. When equal to \c nullptr, the operation is a no-op.
+ */
+extern NANOTHREAD_EXPORT void task_release(Task *task);
+
+/*
+ * \brief Wait for the completion of the specified task
+ *
+ * This function causes the calling thread to sleep until all work units of
+ * 'task' have been completed.
+ *
+ * If an exception was caught during parallel excecution of 'task', the
+ * function \ref task_wait() will re-raise this exception in the context of the
+ * caller. Note that if a parallel task raises many exceptions, only a single
+ * one of them will be be captured in this way.
+ *
+ * \param task
+ *     The task in question. When equal to \c nullptr, the operation is a no-op.
+ */
+extern NANOTHREAD_EXPORT void task_wait(Task *task) NANOTHREAD_THROW;
+
+/*
+ * \brief Wait for the completion of the specified task and release its handle
+ *
+ * This function is equivalent to calling \ref task_wait() followed by \ref
+ * task_release().
+ *
+ * If an exception was caught during parallel excecution of 'task', the
+ * function \ref task_wait_and_release() will perform the release step and then
+ * re-raise this exception in the context of the caller. Note that if a
+ * parallel task raises many exceptions, only a single one of them will be be
+ * captured in this way.
+ *
+ * \param task
+ *     The task in question. When equal to \c nullptr, the operation is a no-op.
+ */
+extern NANOTHREAD_EXPORT void task_wait_and_release(Task *task) NANOTHREAD_THROW;
+
+/*
+ * \brief Variant of \ref task_wait() that only executes work of the given task
+ *
+ * Like \ref task_wait(), this function blocks until all work units of 'task'
+ * have completed, and the calling thread participates in their execution. In
+ * contrast to \ref task_wait(), the calling thread only runs work units
+ * belonging to 'task'. This is useful when the caller holds resources (e.g.
+ * locks) that callbacks of unrelated queued tasks might also try to acquire.
+ *
+ * The function is intended for tasks that are +immediately ready to execute
+ * (i.e., which do not need to wait for completion of +a parent task).
+ * Otherwise, the calling thread waits passively and other threads must complete
+ * the parents. In a pool without worker threads, the wait would then never
+ * finish.
+ *
+ * If an exception was caught during parallel execution of 'task', the
+ * function re-raises it in the context of the caller, as in \ref task_wait().
+ *
+ * \param task
+ *     The task in question. When equal to \c nullptr, the operation is a no-op.
+ */
+extern NANOTHREAD_EXPORT void task_wait_exclusive(Task *task) NANOTHREAD_THROW;
+
+/*
+ * \brief Wait for the completion of the specified task as in \ref
+ * task_wait_exclusive() and release its handle
+ *
+ * This function is equivalent to calling \ref task_wait_exclusive() followed
+ * by \ref task_release(). If an exception was caught during parallel
+ * execution of 'task', the function performs the release step and then
+ * re-raises the exception in the context of the caller.
+ *
+ * \param task
+ *     The task in question. When equal to \c nullptr, the operation is a no-op.
+ */
+extern NANOTHREAD_EXPORT void task_wait_and_release_exclusive(Task *task) NANOTHREAD_THROW;
+
+/*
+ * \brief Variant of \ref task_wait_exclusive() that waits for an array of tasks
+ *
+ * The function blocks until all tasks in the array 'tasks' have completed.
+ * Entries may be \c nullptr or repeated, and all others must belong to the
+ * same pool. The calling thread participates in the execution of the listed
+ * tasks, claiming work from whichever of them currently has runnable units.
+ * It never executes work of unrelated queued tasks, which could block or
+ * recurse in ways that the caller cannot anticipate.
+ *
+ * Work units of a listed task only become claimable once its parent tasks
+ * have completed. Parents that are not part of the array must be completed
+ * by other threads, during which the calling thread waits passively, as in
+ * \ref task_wait_exclusive().
+ *
+ * If exceptions were caught during the parallel execution of the listed
+ * tasks, the first one in array order is re-raised in the context of the
+ * caller.
+ */
+extern NANOTHREAD_EXPORT void task_wait_exclusive_n(size_t size,
+                                                    Task *const *tasks) NANOTHREAD_THROW;
+
+/**
+ * \brief Query whether a task has completed without blocking
+ *
+ * This function checks if all work units of the specified task have been
+ * completed. Unlike \ref task_wait(), this function returns immediately
+ * without blocking.
+ *
+ * \param task
+ *     The task in question. When equal to \c nullptr, the function returns true.
+ *
+ * \return
+ *     true if the task has completed (or is nullptr), false otherwise.
+ */
+extern NANOTHREAD_EXPORT bool task_query(Task *task);
+
+/**
+ * \brief Return the time consumed by the task in milliseconds
+ *
+ * To use this function, the underlying task must have been launched via \ref
+ * task_submit_dep() with the ``profile`` argument set to a nonzero value.
+ * Alternatively, you may call \ref pool_set_profile() before launching tasks
+ * to automatically enable profiling globally.
+ *
+ * The task must have finished previously, use \ref task_wait() if in doubt.
+ */
+extern NANOTHREAD_EXPORT double task_time(Task *task) NANOTHREAD_THROW;
+
+/**
+ * \brief Return the difference between the start time of two different tasks
+ *
+ * To use this function, the underlying task2 must have been launched via \ref
+ * task_submit_dep() with the ``profile`` argument set to a nonzero value.
+ * Alternatively, you may call \ref pool_set_profile() before launching tasks
+ * to automatically enable profiling globally.
+ *
+ * Both tasks must have finished previously, use \ref task_wait() if in doubt.
+ */
+extern NANOTHREAD_EXPORT double task_time_rel(Task *task_1, Task *task_2) NANOTHREAD_THROW;
+
+/*
+ * \brief Increase the reference count of a task
+ *
+ * In advanced use case, it may be helpful if multiple parts of the system can
+ * hold references to a task (and e.g. query timing information or
+ * completeness). The \c task_retain operation enables this by increasing an
+ * internal reference counter so that \ref task_release() must be called
+ * multiple times before the task is actually released.
+ *
+ * \param task
+ *     The task in question. When equal to \c nullptr, the operation is a no-op.
+ */
+extern NANOTHREAD_EXPORT void task_retain(Task *task);
+
+/// Convenience wrapper around task_submit_dep(), but without dependencies
+static inline
+Task *task_submit(Pool *pool,
+                  uint32_t size NANOTHREAD_DEF(1),
+                  void (*func)(uint32_t, void *) NANOTHREAD_DEF(0),
+                  void *payload NANOTHREAD_DEF(0),
+                  uint32_t payload_size NANOTHREAD_DEF(0),
+                  void (*payload_deleter)(void *) NANOTHREAD_DEF(0),
+                  int always_async NANOTHREAD_DEF(0)) {
+
+    return task_submit_dep(pool, 0, 0, size, func, payload, payload_size,
+                           payload_deleter, always_async, 0);
+}
+
+/// Convenience wrapper around task_submit(), but fully synchronous
+static inline
+void task_submit_and_wait(Pool *pool,
+                          uint32_t size NANOTHREAD_DEF(1),
+                          void (*func)(uint32_t, void *) NANOTHREAD_DEF(0),
+                          void *payload NANOTHREAD_DEF(0)) {
+
+    Task *task = task_submit(pool, size, func, payload, 0, 0, 0);
+    task_wait_and_release(task);
+}
+
+/**
+ * \brief Variant of \ref task_submit_and_wait() that waits exclusively
+ *
+ * The calling thread only runs work units of the submitted task and never
+ * touches unrelated queued work, as explained in \ref task_wait_exclusive().
+ */
+static inline
+void task_submit_and_wait_exclusive(Pool *pool,
+                                    uint32_t size NANOTHREAD_DEF(1),
+                                    void (*func)(uint32_t, void *) NANOTHREAD_DEF(0),
+                                    void *payload NANOTHREAD_DEF(0)) {
+
+    Task *task = task_submit(pool, size, func, payload, 0, 0, 0);
+    task_wait_and_release_exclusive(task);
+}
+
+#if defined(__cplusplus)
+}
+
+#include <utility>
+
+namespace drjit {
+    template <typename Int> struct blocked_range {
+    public:
+        blocked_range(Int begin, Int end, Int block_size = 1)
+            : m_begin(begin), m_end(end), m_block_size(block_size) { }
+
+        struct iterator {
+            Int value;
+
+            iterator(Int value) : value(value) { }
+
+            Int operator*() const { return value; }
+            operator Int() const { return value;}
+
+            void operator++() { value++; }
+            bool operator==(const iterator &it) { return value == it.value; }
+            bool operator!=(const iterator &it) { return value != it.value; }
+        };
+
+        uint32_t blocks() const {
+            return (uint32_t) ((m_end - m_begin + m_block_size - 1) / m_block_size);
+        }
+
+        iterator begin() const { return iterator(m_begin); }
+        iterator end() const { return iterator(m_end); }
+        Int block_size() const { return m_block_size; }
+
+    private:
+        Int m_begin;
+        Int m_end;
+        Int m_block_size;
+    };
+
+    template <typename Int, typename Func>
+    void parallel_for(const blocked_range<Int> &range, Func &&func,
+                      Pool *pool = nullptr) {
+
+        struct Payload {
+            Func *f;
+            Int begin, end, block_size;
+        };
+
+        Payload payload{ &func, range.begin(), range.end(),
+                         range.block_size() };
+
+        auto callback = [](uint32_t index, void *payload) {
+            Payload *p = (Payload *) payload;
+            Int begin = p->begin + p->block_size * (Int) index,
+                end = begin + p->block_size;
+
+            if (end > p->end)
+                end = p->end;
+
+            (*p->f)(blocked_range<Int>(begin, end));
+        };
+
+        task_submit_and_wait_exclusive(pool, range.blocks(), callback, &payload);
+    }
+
+    template <typename Int, typename Func>
+    Task *parallel_for_async(const blocked_range<Int> &range, Func &&func,
+                             const Task * const *parents,
+                             size_t parent_count,
+                             Pool *pool = nullptr) {
+        using BaseFunc = typename std::decay<Func>::type;
+
+        struct Payload {
+            BaseFunc f;
+            Int begin, end, block_size;
+        };
+
+        auto callback = [](uint32_t index, void *payload) {
+            Payload *p = (Payload *) payload;
+            Int begin = p->begin + p->block_size * (Int) index,
+                end = begin + p->block_size;
+
+            if (end > p->end)
+                end = p->end;
+
+            p->f(blocked_range<Int>(begin, end));
+        };
+
+        if (std::is_trivially_copyable<BaseFunc>::value &&
+            std::is_trivially_destructible<BaseFunc>::value) {
+            Payload payload{ std::forward<Func>(func), range.begin(),
+                             range.end(), range.block_size() };
+
+            return task_submit_dep(pool, parents,
+                                   (uint32_t) parent_count, range.blocks(),
+                                   callback, &payload, sizeof(Payload), nullptr, 1);
+        } else {
+            Payload *payload = new Payload{ std::forward<Func>(func), range.begin(),
+                                            range.end(), range.block_size() };
+
+            auto deleter = [](void *payload) {
+                delete (Payload *) payload;
+            };
+
+            return task_submit_dep(pool, parents,
+                                   (uint32_t) parent_count, range.blocks(),
+                                   callback, payload, 0, deleter, 1);
+        }
+    }
+
+    template <typename Int, typename Func>
+    Task *parallel_for_async(const blocked_range<Int> &range, Func &&func,
+                             std::initializer_list<const Task *> parents = { },
+                             Pool *pool = nullptr) {
+        return parallel_for_async(range, func, parents.begin(), parents.size(),
+                                  pool);
+    }
+
+    template <typename Func>
+    Task *do_async(Func &&func, const Task * const *parents, size_t parent_count,
+                   Pool *pool = nullptr) {
+        using BaseFunc = typename std::decay<Func>::type;
+
+        struct Payload {
+            BaseFunc f;
+        };
+
+        auto callback = [](uint32_t /* unused */, void *payload) {
+            ((Payload *) payload)->f();
+        };
+
+        if (std::is_trivially_copyable<BaseFunc>::value &&
+            std::is_trivially_destructible<BaseFunc>::value) {
+            Payload payload {std::forward<Func>(func) };
+
+            return task_submit_dep(pool, parents,
+                                   (uint32_t) parent_count, 1, callback,
+                                   &payload, sizeof(Payload), nullptr, 1);
+        } else {
+            Payload *payload = new Payload{ std::forward<Func>(func) };
+
+            auto deleter = [](void *payload) { delete (Payload *) payload; };
+
+            return task_submit_dep(pool, parents,
+                                   (uint32_t) parent_count, 1, callback,
+                                   payload, 0, deleter, 1);
+        }
+    }
+
+    template <typename Func>
+    Task *do_async(Func &&func, std::initializer_list<const Task *> parents = {},
+                   Pool *pool = nullptr) {
+        return do_async(func, parents.begin(), parents.size(), pool);
+    }
+}
+#endif

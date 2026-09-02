@@ -12,4 +12,8 @@ target_compile_definitions(
     PRIVATE FASTNUMPARSE_VERSION="${SKBUILD_PROJECT_VERSION}"
 )
 
+add_subdirectory(${DEPENDENCY_DIR}/fast_float)
+add_subdirectory(${DEPENDENCY_DIR}/nanothread)
+add_subdirectory(${DEPENDENCY_DIR}/pybind11/2.13.6)
+
 install(TARGETS _core LIBRARY DESTINATION fastnumparse)
