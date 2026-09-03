@@ -174,7 +174,7 @@ static void ParallelParseElement(
     const size_t nLines =  lines.size();
 
     // dr::blocked_range<size_t> r = dr::blocked_range<size_t>(0, nLines);
-    dr::parallel_for(dr::blocked_range<size_t>(0, nLines, 1024*16), [&](dr::blocked_range<size_t> r)
+    dr::parallel_for(dr::blocked_range<size_t>(0, nLines, 1 * 8192), [&](dr::blocked_range<size_t> r)
     {
         // std::cout << "parse range count: " << (r.end() - r.begin()) << "\n";
         for (size_t i = r.begin(); i != r.end(); ++i) {
@@ -182,7 +182,7 @@ static void ParallelParseElement(
             parseOneLine(line, i);
         }    
     }, pool.get());
-    std::cout << "block size:" << 1024*16 << std::endl;
+    // std::cout << "block size:" << 1024*16 << std::endl;
 }
 
 /// this is 20x faster than std::istringstream method
