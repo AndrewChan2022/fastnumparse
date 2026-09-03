@@ -898,27 +898,27 @@ std::pair<py::array, std::size_t> from_string_buffer_noncsv(
 
     if (dtype.is(py::dtype::of<char>())) {
         return parse_dynamic_column_buffer_as<char>(
-            reader, comment, endChar, maxThreads);
+            reader, comment, endChar, nelement, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<double>())) {
         return parse_dynamic_column_buffer_as<double>(
-            reader, comment, endChar, maxThreads);
+            reader, comment, endChar, nelement, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<float>())) {
         return parse_dynamic_column_buffer_as<float>(
-            reader, comment, endChar, maxThreads);
+            reader, comment, endChar, nelement, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<std::int64_t>())) {
         return parse_dynamic_column_buffer_as<std::int64_t>(
-            reader, comment, endChar, maxThreads);
+            reader, comment, endChar, nelement, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<std::int32_t>())) {
         return parse_dynamic_column_buffer_as<std::int32_t>(
-            reader, comment, endChar, maxThreads);
+            reader, comment, endChar, nelement, maxThreads);
     }
 
     throw py::type_error("unsupported dtype");
@@ -1014,5 +1014,18 @@ PYBIND11_MODULE(_fastnumparse, module) {
         py::arg("ndmin"),
         py::arg("max_threads") = 16,
         "Parse csv like data from string buffer, fix rows and column, space delimeter and # comment."
+    );
+
+    module.def(
+        "from_string_buffer_noncsv",
+        &fastnumparse::from_string_buffer_noncsv,
+        py::arg("input"),
+        py::arg("offset"),
+        py::arg("dtype"),
+        py::arg("comment"),
+        py::arg("end_char"),
+        py::arg("nelement"),
+        py::arg("max_threads") = 16,
+        "Parse non-CSV data with a known total element count from a string buffer, parse line until meet end char."
     );
 }
