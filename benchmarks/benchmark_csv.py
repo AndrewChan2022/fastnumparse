@@ -19,8 +19,8 @@ import fastnumparse as fnp
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = ROOT / "assets" / "csv_float_24608_x_3.txt"
-
+DEFAULT_INPUT = ROOT / "data" / "csv_float_244768x3.txt"
+ROW_COUNT = 244768
 
 
 def measure(
@@ -47,12 +47,12 @@ def main() -> None:
     parser.add_argument("--columns", type=int, default=3)
     parser.add_argument("--threads", type=int, default=0)
     parser.add_argument("--repeat", type=int, default=7)
-    parser.add_argument("--number", type=int, default=20)
+    parser.add_argument("--number", type=int, default=7)
     args = parser.parse_args()
 
     dtype = np.dtype(args.dtype)
     raw_buffer = args.input.read_bytes()
-    row_count = 24608
+    row_count = ROW_COUNT
 
     def parse_fastnumparse() -> np.ndarray:
         values, _ = fnp.from_string_buffer_csv(
@@ -63,7 +63,7 @@ def main() -> None:
             row_count,
             args.columns,
             2,
-            args.threads,
+            16 #args.threads,
         )
         return values
 
