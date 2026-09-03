@@ -4,6 +4,7 @@
 #include <fast_float/fast_float.h>
 #include <nanothread/nanothread.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
@@ -12,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 #include <array>
 #include <charconv>
@@ -149,8 +151,9 @@ static void ParallelParseElement(
     const ParseOneLineFunc& parseOneLine
 ) {
     // if maxThread == 0, max cpu core
-    maxThreads = maxThreads <= 0 ? core_count() - 1 : maxThreads;
-    maxThreads = maxThreads <= 0 ? 1 : maxThreads;
+    const int32_t cores = static_cast<int32_t>(core_count());
+    maxThreads = maxThreads <= 0 ? cores - 1 : maxThreads;
+    maxThreads = std::clamp(maxThreads, 1, cores);
     std::unique_ptr<Pool, decltype(&pool_destroy)> pool(
         pool_create(static_cast<uint32_t>(maxThreads)),
         &pool_destroy
@@ -429,34 +432,80 @@ static py::array parse_fix_column_buffer_as(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t ndmin,
+    std::int32_t ndmin = 0,
     std::int32_t maxThreads = 16
 ) {
-    std::string_view line;
-    
-    std::vector<std::string_view> vertexLines;
-    vertexLines.reserve(maxRows);
-    for (size_t i = 0; i < maxRows; ++i) {
-        infile.getline(line);
-        vertexLines.push_back(line);
+    if (ndmin < 0 || ndmin > 2) {
+        throw py::value_error("ndmin must be 0, 1, or 2");
+    }
+    if (columnCount == 0) {
+        throw py::value_error("columnCount cannot be zero");
     }
 
+    std::string_view line;
+    
+    std::vector<std::string_view> lines;
+    lines.reserve(maxRows);
+    while (lines.size() < maxRows && infile.getline(line)) {
+        lines.push_back(line);
+    }
+
+    if (lines.size() > std::numeric_limits<std::size_t>::max() / columnCount) {
+        throw py::value_error("requested array is too large");
+    }
+    std::vector<T> values(lines.size() * columnCount);
 
     // this is 20x faster than std::istringstream method
     // parallel 4x more faster
     // totally 80x faster
-    ParallelParseElement(vertexLines, maxThreads, [&](const std::string_view& line, size_t i) {
-        std::array<double, 16> numbers;
-        auto ret = parse_fix_number_floats(line, numbers);
-        if (ret != columnCount) {
-            std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
-                        << columnCount << " got " << ret << ".\n";
-            throw std::runtime_error("parse line column count mismatch");
+    ParallelParseElement(lines, maxThreads, [&](std::string_view inputLine, size_t i) {
+        if (!comment.empty()) {
+            const size_t commentPos = inputLine.find(comment);
+            if (commentPos != std::string_view::npos) {
+                inputLine = inputLine.substr(0, commentPos);
+            }
         }
-        for (size_t j = 0; j < columnCount; ++j) {
-            mGrid.vertices[i].coords[j] = numbers[j];
+
+        size_t ret = 0;
+        if constexpr (std::is_floating_point<T>::value) {
+            std::array<double, 16> numbers{};
+            ret = parse_fix_number_floats(inputLine, numbers);
+            for (size_t j = 0; j < columnCount; ++j) {
+                values[i * columnCount + j] = static_cast<T>(numbers[j]);
+            }
+        } else if constexpr (std::is_integral<T>::value) {
+            std::array<int64_t, 16> numbers{};
+            ret = parse_fix_number_int32(inputLine, numbers);
+            for (size_t j = 0; j < columnCount; ++j) {
+                if (numbers[j] < std::numeric_limits<T>::min() ||
+                    numbers[j] > std::numeric_limits<T>::max()) {
+                    throw std::out_of_range(
+                        "integer value is outside the requested dtype range");
+                }
+                values[i * columnCount + j] = static_cast<T>(numbers[j]);
+            }
+        }
+
+        if (ret != columnCount) {
+            throw std::runtime_error(
+                "parse line " + std::to_string(i) +
+                " column count mismatch: expected " +
+                std::to_string(columnCount) + ", got " +
+                std::to_string(ret));
         }
     });
+
+    std::vector<py::ssize_t> shape;
+    if (ndmin < 2) {
+        shape.push_back(static_cast<py::ssize_t>(values.size()));
+    } else {
+        shape.push_back(static_cast<py::ssize_t>(lines.size()));
+        shape.push_back(static_cast<py::ssize_t>(columnCount));
+    }
+
+    py::array_t<T> result(shape);
+    std::copy(values.begin(), values.end(), result.mutable_data());
+    return result;
 }
 
 // this like csv data with space delimiter
@@ -489,10 +538,8 @@ py::array parse_fix_column_buffer(
     }
 
     const auto* buffer = static_cast<const char*>(info.ptr);
-    const char* begin = buffer + offset;
-    const std::size_t length = buffer_size - offset;
-
-    FastLineReader reader(begin, length);
+    FastLineReader reader(buffer, buffer_size);
+    reader.set_position(offset);
 
     const py::dtype dtype = py::dtype::from_args(dtypeArg);
 
