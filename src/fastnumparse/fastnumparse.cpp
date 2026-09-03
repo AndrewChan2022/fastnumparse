@@ -693,79 +693,142 @@ template FAST_NUM_PARSE_API std::vector<std::int64_t> from_file_csv<std::int64_t
     bool
 );
 
-// template<typename T>
-// static py::array parse_dynamic_column_buffer_as(
-//     FastLineReader& infile,
-//     const std::string& comment,
-//     std::size_t maxRows,
-//     std::string endChar, // 
-//     std::int32_t ndmin,
-//     std::int32_t maxThreads = 16
-// ) {
+template<typename T>
+static std::vector<T> parse_dynamic_column_buffer_as_vector(
+    FastLineReader& infile,
+    const std::string& comment,
+    std::string endChar, // 
+    std::int32_t maxThreads = 16,
+    bool verbose = false
+) {
 
-// }
+    return {};
+}
+
+template<typename T>
+static py::array parse_dynamic_column_buffer_as(
+    FastLineReader& infile,
+    const std::string& comment,
+    std::string endChar, // 
+    std::int32_t maxThreads = 16
+) {
+
+    return {};
+}
 
 
-// // this like csv data with space delimiter, 
-// // but each line may contain half row data or many row data
-// // delimiter must be space
-// // may have comment at tail
-// // no other things like } at tail
-// // return new position                      ---
-// py::array from_buffer_noncsv(
-//     py::buffer input,
-//     std::size_t offset,
-//     py::object dtypeArg,
-//     const std::string& comment,
-//     std::size_t maxRows,
-//     std::string endChar, // 
-//     std::int32_t ndmin,
-//     std::int32_t maxThreads = 16
-// ) {
-//     const py::buffer_info info = input.request();
+// this like csv data with space delimiter, 
+// but each line may contain half row data or many row data
+// delimiter must be space
+// may have comment at tail
+// no other things like } at tail
+// return new position                      ---
+py::array from_string_buffer_noncsv(
+    py::buffer input,
+    std::size_t offset,
+    py::object dtypeArg,
+    const std::string& comment,
+    std::string endChar, // 
+    std::int32_t maxThreads = 16
+) {
+    const py::buffer_info info = input.request();
 
-//     // This parser expects a contiguous byte buffer.
-//     if (info.ndim != 1 || info.itemsize != 1 || info.strides[0] != 1) {
-//         throw py::value_error(
-//             "buffer must be a contiguous one-dimensional byte buffer");
-//     }
+    // This parser expects a contiguous byte buffer.
+    if (info.ndim != 1 || info.itemsize != 1 || info.strides[0] != 1) {
+        throw py::value_error(
+            "buffer must be a contiguous one-dimensional byte buffer");
+    }
 
-//     const auto buffer_size = static_cast<std::size_t>(info.size);
+    const auto buffer_size = static_cast<std::size_t>(info.size);
 
-//     if (offset > buffer_size) {
-//         throw py::value_error("offset exceeds buffer size");
-//     }
+    if (offset > buffer_size) {
+        throw py::value_error("offset exceeds buffer size");
+    }
 
-//     const auto* buffer = static_cast<const char*>(info.ptr);
-//     const char* begin = buffer + offset;
-//     const std::size_t length = buffer_size - offset;
+    const auto* buffer = static_cast<const char*>(info.ptr);
+    const char* begin = buffer + offset;
+    const std::size_t length = buffer_size - offset;
 
-//     FastLineReader reader(begin, length);
+    FastLineReader reader(begin, length);
 
-//     const py::dtype dtype = py::dtype::from_args(dtypeArg);
+    const py::dtype dtype = py::dtype::from_args(dtypeArg);
 
-//     if (dtype.is(py::dtype::of<double>())) {
-//         return parse_dynamic_column_buffer_as<double>(
-//             reader, comment, maxRows, endChar, ndmin, maxThreads);
-//     }
+    if (dtype.is(py::dtype::of<double>())) {
+        return parse_dynamic_column_buffer_as<double>(
+            reader, comment, endChar, maxThreads);
+    }
 
-//     if (dtype.is(py::dtype::of<float>())) {
-//         return parse_dynamic_column_buffer_as<float>(
-//             reader, comment, maxRows, endChar, ndmin, maxThreads);
-//     }
+    if (dtype.is(py::dtype::of<float>())) {
+        return parse_dynamic_column_buffer_as<float>(
+            reader, comment, endChar, maxThreads);
+    }
 
-//     if (dtype.is(py::dtype::of<std::int64_t>())) {
-//         return parse_dynamic_column_buffer_as<std::int64_t>(
-//             reader, comment, maxRows, endChar, ndmin, maxThreads);
-//     }
+    if (dtype.is(py::dtype::of<std::int64_t>())) {
+        return parse_dynamic_column_buffer_as<std::int64_t>(
+            reader, comment, endChar, maxThreads);
+    }
 
-//     if (dtype.is(py::dtype::of<std::int32_t>())) {
-//         return parse_dynamic_column_buffer_as<std::int32_t>(
-//             reader, comment, maxRows, endChar, ndmin, maxThreads);
-//     }
+    if (dtype.is(py::dtype::of<std::int32_t>())) {
+        return parse_dynamic_column_buffer_as<std::int32_t>(
+            reader, comment, endChar, maxThreads);
+    }
 
-//     throw py::type_error("unsupported dtype");
-// }
+    throw py::type_error("unsupported dtype");
+}
+
+
+// this like csv data with space delimiter and # comment
+// each line fix column number, 
+// delimiter must be space
+// comment at tail and must start with #
+// not include line with end symbol such as }
+template<typename T>
+std::vector<T> from_file_noncsv(
+    const std::string& file,
+    const std::string& comment,
+    std::string endChar, // 
+    std::int32_t maxThreads,
+    bool verbose
+) {
+    // TODO: comment must be '#'
+    if (comment != "#") {
+        throw py::value_error("comment must be #");
+    }
+
+    const auto readStart = std::chrono::steady_clock::now();
+
+    FastLineReader infile(file);
+    
+    const auto readEnd = std::chrono::steady_clock::now();
+    const double readMilliseconds =
+        std::chrono::duration<double, std::milli>(readEnd - readStart).count();
+    if (verbose) {
+        std::cout << "from_file_csv FastLineReader: "
+                << readMilliseconds << " ms\n";
+    }
+
+    auto values = parse_dynamic_column_buffer_as_vector<T>(
+        infile, comment, endChar, maxThreads, verbose);
+    return values;
+}
+
+
+template FAST_NUM_PARSE_API std::vector<double> from_file_noncsv(
+    const std::string& file,
+    const std::string& comment,
+    std::string endChar, // 
+    std::int32_t maxThreads,
+    bool verbose
+);
+
+template FAST_NUM_PARSE_API std::vector<int64_t> from_file_noncsv(
+    const std::string& file,
+    const std::string& comment,
+    std::string endChar, // 
+    std::int32_t maxThreads,
+    bool verbose
+);
+
 
 } // namespace fastnumparse
 
