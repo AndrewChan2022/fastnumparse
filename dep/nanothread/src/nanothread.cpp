@@ -1,0 +1,678 @@
+/*
+    src/pool.cpp -- Simple thread pool with task-based API
+
+    Copyright (c) 2021 Wenzel Jakob <wenzel.jakob@epfl.ch>
+
+    All rights reserved. Use of this source code is governed by a BSD-style
+    license that can be found in the LICENSE file.
+*/
+
+#include <nanothread/nanothread.h>
+#include "queue.h"
+#include <cstdlib>
+#include <memory>
+#include <thread>
+#include <type_traits>
+
+#if defined(__linux__)
+#  include <unistd.h>
+#  include <sched.h>
+#elif defined(_WIN32)
+#  include <windows.h>
+#  include <processthreadsapi.h>
+#elif defined(__APPLE__)
+#  include <pthread.h>
+#  include <pthread/qos.h>
+#  include <sys/sysctl.h>
+#  include <os/workgroup.h>
+#  include <Availability.h>
+#  if __MAC_OS_X_VERSION_MIN_REQUIRED < 110000
+#    error "nanothread requires a macOS deployment target of 11.0 or later"
+#  endif
+#endif
+
+#if defined(_MSC_VER)
+#  include <intrin.h>
+#elif defined(__SSE2__)
+#  include <pmmintrin.h>
+#endif
+
+struct Worker;
+
+/// TLS variable storing an ID of each thread
+#if defined(_MSC_VER)
+    static __declspec(thread) uint32_t thread_id_tls = 0;
+#else
+    static __thread uint32_t thread_id_tls = 0;
+#endif
+
+/// Data structure describing a pool of workers
+struct Pool {
+    /// Queue of scheduled tasks
+    TaskQueue queue;
+
+    /// List of currently running worker threads
+    std::vector<std::unique_ptr<Worker>> workers;
+
+    /// Should denormalized floating point numbers be flushed to zero?
+    bool ftz = true;
+
+#if defined(__APPLE__)
+    /// Parallel workgroup advising the scheduler to co-schedule the worker
+    /// threads on the same performance cluster (as in GCD's dispatch_apply).
+    /// Each worker joins/leaves on its own thread (see worker function); the
+    /// creating thread deliberately does *not* join.
+    os_workgroup_t workgroup = nullptr;
+#endif
+};
+
+struct Worker {
+    Pool *pool;
+    std::thread thread;
+    uint32_t id;
+    std::atomic<bool> stop;
+    bool ftz;
+
+    /// Park immediately on boot instead of spinning before the first park?
+    bool start_parked;
+
+    Worker(Pool *pool, uint32_t id, bool ftz, bool start_parked);
+    ~Worker();
+    void run();
+};
+
+
+static Pool *pool_default_inst = nullptr;
+static Lock pool_default_lock;
+static uint32_t cached_core_count = 0;
+static uint32_t cached_perf_core_count = 0;
+
+uint32_t core_count() {
+    // assumes atomic word size memory access
+    if (cached_core_count)
+        return cached_core_count;
+
+    // Determine the number of present cores
+    uint32_t ncores = std::thread::hardware_concurrency();
+
+#if defined(__linux__)
+    // Don't try to query CPU affinity if running inside Valgrind
+    if (getenv("VALGRIND_OPTS") == nullptr) {
+        /* Some of the cores may not be available to the user
+           (e.g. on certain cluster nodes) -- determine the number
+           of actual available cores here. */
+        uint32_t ncores_logical = ncores;
+        size_t size = 0;
+        cpu_set_t *cpuset = nullptr;
+        int retval = 0;
+
+        /* The kernel may expect a larger cpu_set_t than would
+           be warranted by the physical core count. Keep querying
+           with increasingly larger buffers if the
+           sched_getaffinity operation fails */
+        for (uint32_t i = 0; i < 10; ++i) {
+            size = CPU_ALLOC_SIZE(ncores_logical);
+            cpuset = CPU_ALLOC(ncores_logical);
+            if (!cpuset) {
+                fprintf(stderr, "nanothread: core_count(): Could not allocate cpu_set_t.\n");
+                return ncores;
+            }
+            CPU_ZERO_S(size, cpuset);
+
+            retval = sched_getaffinity(0, size, cpuset);
+            if (retval == 0)
+                break;
+            CPU_FREE(cpuset);
+            ncores_logical *= 2;
+        }
+
+        if (retval) {
+            fprintf(stderr, "nanothread: core_count(): Could not read thread affinity map.\n");
+            return ncores;
+        }
+
+        uint32_t ncores_avail = 0;
+        for (uint32_t i = 0; i < ncores_logical; ++i)
+            ncores_avail += CPU_ISSET_S(i, size, cpuset) ? 1 : 0;
+        ncores = ncores_avail;
+        CPU_FREE(cpuset);
+    }
+#endif
+    cached_core_count = ncores;
+    return ncores;
+}
+
+uint32_t performance_core_count() {
+    if (cached_perf_core_count)
+        return cached_perf_core_count;
+
+    uint32_t n = 0;
+#if defined(__APPLE__)
+    size_t size = sizeof(n);
+    if (sysctlbyname("hw.perflevel0.physicalcpu", &n, &size, nullptr, 0) != 0)
+        n = 0;
+#endif
+
+    if (n == 0)
+        n = core_count();
+
+    cached_perf_core_count = n;
+    return n;
+}
+
+
+uint32_t pool_thread_id() {
+    return thread_id_tls;
+}
+
+Pool *pool_default() {
+    std::unique_lock<Lock> guard(pool_default_lock);
+
+    if (!pool_default_inst)
+        pool_default_inst = pool_create();
+
+    return pool_default_inst;
+}
+
+Pool *pool_create(uint32_t size, int ftz) {
+    Pool *pool = new Pool();
+    pool->ftz = ftz != 0;
+#if defined(__APPLE__)
+    // Create the workgroup the workers co-schedule on, and bias this thread to
+    // the performance cluster.
+    pool->workgroup = os_workgroup_parallel_create("nanothread", nullptr);
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
+#endif
+    NT_TRACE("pool_create(%p)", pool);
+    pool_set_size(pool, size);
+    return pool;
+}
+
+
+void pool_destroy(Pool *pool) {
+    if (pool) {
+        pool_set_size(pool, 0);
+#if defined(__APPLE__)
+        if (pool->workgroup) {
+            os_release(pool->workgroup);
+            pool->workgroup = nullptr;
+        }
+#endif
+        delete pool;
+    } else if (pool_default_inst) {
+        pool_destroy(pool_default_inst);
+        pool_default_inst = nullptr;
+    }
+}
+
+uint32_t pool_size(Pool *pool) {
+    if (!pool) {
+        std::unique_lock<Lock> guard(pool_default_lock);
+        pool = pool_default_inst;
+    }
+
+    if (pool)
+        return (uint32_t) pool->workers.size() + 1;
+    else
+        return performance_core_count();
+}
+
+void pool_set_size(Pool *pool, uint32_t size, int start_parked) {
+    if (!pool) {
+        std::unique_lock<Lock> guard(pool_default_lock);
+        pool = pool_default_inst;
+
+        if (!pool)
+            pool = pool_default_inst = pool_create(0);
+    }
+
+    if (size == NANOTHREAD_AUTO)
+        size = performance_core_count();
+
+    NT_TRACE("pool_set_size(%p, %u, start_parked=%i)", pool, size, start_parked);
+
+    // `size` counts the calling thread as a worker, so subtract one.
+    // `size == 0` is accepted as a shorthand for "no worker threads".
+    uint32_t workers = size > 0 ? size - 1 : 0;
+
+    int diff = (int) workers - (int) pool->workers.size();
+    if (diff > 0) {
+        // Launch extra worker threads
+        for (int i = 0; i < diff; ++i)
+            pool->workers.push_back(std::unique_ptr<Worker>(
+                new Worker(pool, (uint32_t) pool->workers.size() + 1, pool->ftz,
+                           start_parked != 0)));
+    } else if (diff < 0) {
+        // Remove worker threads (destructor calls join())
+        for (int i = diff; i != 0; ++i)
+            pool->workers[pool->workers.size() + i]->stop.store(
+                true, std::memory_order_relaxed);
+        pool->queue.wake_everyone();
+        for (int i = diff; i != 0; ++i)
+            pool->workers.pop_back();
+    }
+}
+
+int profile_tasks = false;
+
+int pool_profile() {
+    return (int) profile_tasks;
+}
+
+void pool_set_profile(int value) {
+    profile_tasks = (bool) value;
+}
+
+Task *task_submit_dep(Pool *pool, const Task *const *parent,
+                      uint32_t parent_count, uint32_t size,
+                      void (*func)(uint32_t, void *), void *payload,
+                      uint32_t payload_size, void (*payload_deleter)(void *),
+                      int async, int profile) {
+
+    if (size == 0) {
+        // There is no work, so the payload is irrelevant
+        func = nullptr;
+
+        // The queue requires task size >= 1
+        size = 1;
+    }
+
+    // Enable profiling if requested globally or via the 'profile' argument
+    bool profile_task = profile_tasks || profile != 0;
+
+    // Does the task have parent tasks
+    bool has_parent = false;
+    for (uint32_t i = 0; i < parent_count; ++i)
+        has_parent |= parent[i] != nullptr;
+
+    // If this is a small work unit, execute it right away
+    if (size == 1 && !has_parent && async == 0) {
+        NT_TRACE("task_submit_dep(): task is small, executing right away");
+
+        Task *task = nullptr;
+        if (profile_task) {
+            if (!pool)
+                pool = pool_default();
+            task = pool->queue.alloc(size);
+            task->time_start.store(get_time_raw(), std::memory_order_relaxed);
+        }
+
+        if (func)
+            func(0, payload);
+
+        if (payload_deleter)
+            payload_deleter(payload);
+
+        if (task) {
+            task->time_end.store(get_time_raw(), std::memory_order_relaxed);
+            task->refcount.store(high_bit, std::memory_order_relaxed);
+            task->exception_used.store(false, std::memory_order_relaxed);
+            task->exception = nullptr;
+            task->size = size;
+            task->func = func;
+            task->pool = pool;
+            task->payload = nullptr;
+            task->payload_deleter = nullptr;
+        }
+
+        return task;
+    }
+
+    if (!pool)
+        pool = pool_default();
+
+    Task *task = pool->queue.alloc(size);
+    task->exception_used.store(false, std::memory_order_relaxed);
+    task->exception = nullptr;
+
+    if (has_parent) {
+        // Prevent early job submission due to completion of parents
+        task->wait_parents.store(1, std::memory_order_release);
+
+        // Register dependencies in queue, will further increase child->wait_parents
+        for (uint32_t i = 0; i < parent_count; ++i)
+            pool->queue.add_dependency((Task *) parent[i], task);
+    }
+
+    task->size = size;
+    task->func = func;
+    task->pool = pool;
+    task->profile = profile_task;
+
+    if (payload) {
+        if (payload_deleter || payload_size == 0) {
+            task->payload = payload;
+            task->payload_deleter = payload_deleter;
+        } else if (payload_size <= sizeof(Task::payload_storage)) {
+            task->payload = task->payload_storage;
+            memcpy(task->payload_storage, payload, payload_size);
+            task->payload_deleter = nullptr;
+        } else {
+            /* Payload doesn't fit into temporary storage, and no
+               custom deleter was provided. Make a temporary copy. */
+            task->payload = malloc(payload_size);
+            task->payload_deleter = free;
+            NT_ASSERT(task->payload != nullptr);
+            memcpy(task->payload, payload, payload_size);
+        }
+    } else {
+        task->payload = nullptr;
+        task->payload_deleter = nullptr;
+    }
+
+    bool push = true;
+    if (has_parent) {
+        /* Undo the earlier 'wait' increment. If the value is now zero, all
+           parent tasks have completed and the job can be pushed. Otherwise,
+           it's somebody else's job to carry out this step. */
+        push = task->wait_parents.fetch_sub(1) == 1;
+    }
+
+    if (push)
+        pool->queue.push(task);
+
+    return task;
+}
+
+/// Run one claimed work unit of 'task' and capture exceptions
+static void execute_unit(Task *task, uint32_t index) {
+    if (!task->func)
+        return;
+
+    if (task->exception_used.load()) {
+        NT_TRACE(
+            "not running callback (task=%p, index=%u) because another "
+            "work unit of this task generated an exception",
+            task, index);
+        return;
+    }
+
+    try {
+        NT_TRACE("running callback (task=%p, index=%u, payload=%p)", task, index, task->payload);
+        task->func(index, task->payload);
+    } catch (...) {
+        bool value = false;
+        if (task->exception_used.compare_exchange_strong(value, true)) {
+            NT_TRACE("exception caught, storing..");
+            task->exception = std::current_exception();
+        } else {
+            NT_TRACE("exception caught, ignoring (an exception was already stored)");
+        }
+    }
+}
+
+static void pool_execute_task(Pool *pool, bool (*stopping_criterion)(void *),
+                              void *payload, bool may_sleep,
+                              SleepKind sleep_kind,
+                              bool park_immediately = false) {
+    Task *task;
+    uint32_t index;
+    std::tie(task, index) =
+        pool->queue.pop_or_sleep(stopping_criterion, payload, may_sleep,
+                                 sleep_kind, park_immediately);
+
+    if (task) {
+        execute_unit(task, index);
+        pool->queue.release(task);
+    }
+}
+
+void pool_work_until(Pool *pool, bool (*stopping_criterion)(void *), void *payload) {
+    if (!pool)
+        pool = pool_default_inst;
+    if (!pool)
+        return;
+    while (!stopping_criterion(payload))
+        pool_execute_task(pool, stopping_criterion, payload, false,
+                          SleepKind::Helper);
+}
+
+#if defined(__SSE2__) || defined(_M_X64)
+struct FTZGuard {
+    FTZGuard(bool enable) : enable(enable) {
+        if (enable) {
+            csr = _mm_getcsr();
+            _mm_setcsr(csr | (_MM_FLUSH_ZERO_ON | _MM_DENORMALS_ZERO_ON));
+        }
+    }
+
+    ~FTZGuard() {
+        if (enable)
+            _mm_setcsr(csr);
+    }
+
+    bool enable;
+    int csr;
+};
+#else
+struct FTZGuard { FTZGuard(bool) { } };
+#endif
+
+void task_wait(Task *task) {
+    if (task) {
+        Pool *pool = task->pool;
+        FTZGuard ftz_guard(pool->ftz);
+
+        // Signal that we are waiting for this task
+        task->wait_count++;
+
+        auto stopping_criterion = [](void *ptr) -> bool {
+            return (uint32_t)(((Task *) ptr)->refcount.load()) == 0;
+        };
+
+        NT_TRACE("task_wait(%p)", task);
+
+        // Help executing work units in the meantime
+        while (!stopping_criterion(task))
+            pool_execute_task(pool, stopping_criterion, task, true,
+                              SleepKind::Helper);
+
+        task->wait_count--;
+
+        if (task->exception)
+            std::rethrow_exception(task->exception);
+    }
+}
+
+void task_wait_exclusive(Task *task) {
+    if (task) {
+        Pool *pool = task->pool;
+        FTZGuard ftz_guard(pool->ftz);
+
+        // Signal that we are waiting for this task
+        task->wait_count++;
+
+        NT_TRACE("task_wait_exclusive(%p)", task);
+
+        // Claim and execute work units of 'task', but of no other task
+        uint32_t index;
+        while (pool->queue.claim_or_sleep(task, index)) {
+            execute_unit(task, index);
+            pool->queue.release(task);
+        }
+
+        task->wait_count--;
+
+        if (task->exception)
+            std::rethrow_exception(task->exception);
+    }
+}
+
+void task_wait_and_release_exclusive(Task *task) NANOTHREAD_THROW {
+    try {
+        task_wait_exclusive(task);
+    } catch (...) {
+        task_release(task);
+        throw;
+    }
+    task_release(task);
+}
+
+void task_wait_exclusive_n(size_t size, Task *const *tasks) NANOTHREAD_THROW {
+    Pool *pool = nullptr;
+    for (size_t i = 0; i < size; ++i) {
+        if (tasks[i]) {
+            pool = tasks[i]->pool;
+            break;
+        }
+    }
+    if (!pool)
+        return;
+
+    FTZGuard ftz_guard(pool->ftz);
+
+    // Signal that we are waiting for these tasks, so that their completion
+    // broadcasts in release() wake this thread from the exclusive parking lot
+    for (size_t i = 0; i < size; ++i)
+        if (tasks[i])
+            tasks[i]->wait_count++;
+
+    NT_TRACE("task_wait_exclusive_n(%zu tasks)", size);
+
+    // Working copy without null entries; claim_any_or_sleep() prunes
+    // completed tasks from it
+    std::vector<Task *> remain;
+    remain.reserve(size);
+    for (size_t i = 0; i < size; ++i) {
+        if (tasks[i])
+            remain.push_back(tasks[i]);
+    }
+
+    size_t remain_size = remain.size();
+    uint32_t index;
+    while (Task *task = pool->queue.claim_any_or_sleep(remain.data(),
+                                                       remain_size, index)) {
+        execute_unit(task, index);
+        pool->queue.release(task);
+    }
+
+    std::exception_ptr eptr;
+    for (size_t i = 0; i < size; ++i) {
+        Task *task = tasks[i];
+        if (task) {
+            task->wait_count--;
+            if (task->exception && !eptr)
+                eptr = task->exception;
+        }
+    }
+
+    if (eptr)
+        std::rethrow_exception(eptr);
+}
+
+void task_retain(Task *task) {
+    if (task)
+        task->pool->queue.retain(task);
+}
+
+void task_release(Task *task) {
+    if (task)
+        task->pool->queue.release(task, true);
+}
+
+void task_wait_and_release(Task *task) NANOTHREAD_THROW {
+    try {
+        task_wait(task);
+    } catch (...) {
+        task_release(task);
+        throw;
+    }
+    task_release(task);
+}
+
+bool task_query(Task *task) {
+    if (!task)
+        return true;
+
+    uint32_t remaining = (uint32_t) task->refcount.load();
+    return remaining == 0;
+}
+
+/// Convert a \ref get_time_raw delta to milliseconds; return 0 for invalid inputs.
+static double raw_delta_ms(uint64_t end, uint64_t start) {
+    if (start == 0 || end == 0 || end < start)
+        return 0.0;
+#if defined(_WIN32)
+    return timer_frequency_scale_ms * (double) (end - start);
+#else
+    return (double) (end - start) * 1e-6;
+#endif
+}
+
+NANOTHREAD_EXPORT double task_time(Task *task) NANOTHREAD_THROW {
+    if (!task)
+        return 0;
+    return raw_delta_ms(task->time_end.load(std::memory_order_relaxed),
+                        task->time_start.load(std::memory_order_relaxed));
+}
+
+NANOTHREAD_EXPORT double task_time_rel(Task *task_1, Task *task_2) NANOTHREAD_THROW {
+    if (!task_1 || !task_2)
+        return 0;
+    return raw_delta_ms(task_2->time_start.load(std::memory_order_relaxed),
+                        task_1->time_start.load(std::memory_order_relaxed));
+}
+
+Worker::Worker(Pool *pool, uint32_t id, bool ftz, bool start_parked)
+    : pool(pool), id(id), stop(false), ftz(ftz), start_parked(start_parked) {
+    thread = std::thread(&Worker::run, this);
+}
+
+Worker::~Worker() { thread.join(); }
+
+void Worker::run() {
+    thread_id_tls = id;
+
+    NT_TRACE("worker started");
+
+    #if defined(_WIN32)
+        wchar_t buf[16];
+        _snwprintf(buf, sizeof(buf) / sizeof(wchar_t), L"nt [%u]", id);
+        SetThreadDescription(GetCurrentThread(), buf);
+    #else
+        char buf[16];
+        snprintf(buf, sizeof(buf), "nt [%u]", id);
+        #if defined(__APPLE__)
+            pthread_setname_np(buf);
+        #else
+            pthread_setname_np(pthread_self(), buf);
+        #endif
+    #endif
+
+#if defined(__APPLE__)
+    // Raise the QoS class so the scheduler keeps workers on the
+    // performance cluster.
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
+
+    // Join the parallel workgroup for the lifetime of this worker.
+    os_workgroup_join_token_s wg_token;
+    bool wg_joined = false;
+    if (pool->workgroup &&
+        os_workgroup_join(pool->workgroup, &wg_token) == 0)
+        wg_joined = true;
+#endif
+
+    FTZGuard ftz_guard(ftz);
+    pool->queue.worker_started();
+    bool park_immediately = start_parked;
+    while (!stop.load(std::memory_order_relaxed)) {
+        pool_execute_task(
+            pool,
+            [](void *ptr) -> bool {
+                return ((std::atomic<bool> *) ptr)
+                    ->load(std::memory_order_relaxed);
+            },
+            &stop, true, SleepKind::Worker, park_immediately);
+        park_immediately = false;
+    }
+    pool->queue.worker_stopped();
+
+#if defined(__APPLE__)
+    if (wg_joined)
+        os_workgroup_leave(pool->workgroup, &wg_token);
+#endif
+
+    NT_TRACE("worker stopped");
+
+    thread_id_tls = 0;
+}
