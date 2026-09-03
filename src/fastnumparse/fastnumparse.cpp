@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -431,44 +432,30 @@ static py::array parse_fix_column_buffer_as(
     std::int32_t ndmin,
     std::int32_t maxThreads = 16
 ) {
+    std::string_view line;
     
     std::vector<std::string_view> vertexLines;
-    vertexLines.reserve(mInfo.nb_vertices);
-    for (size_t i = 0; i < mInfo.nb_vertices; ++i) {
+    vertexLines.reserve(maxRows);
+    for (size_t i = 0; i < maxRows; ++i) {
         infile.getline(line);
         vertexLines.push_back(line);
-        // auto hashPos = line.find('#');
-        // if (hashPos != std::string::npos) line = line.substr(0, hashPos);
-        // std::istringstream ss(line);
-        // for (size_t j = 0; j < mInfo.dimension; ++j) {
-        //     ss >> mGrid.vertices[static_cast<uint64_t>(i)][static_cast<uint64_t>(j)];
-        // }
     }
 
 
-    // this is 20x faster than below std::istringstream method
+    // this is 20x faster than std::istringstream method
     // parallel 4x more faster
     // totally 80x faster
     ParallelParseElement(vertexLines, maxThreads, [&](const std::string_view& line, size_t i) {
         std::array<double, 16> numbers;
         auto ret = parse_fix_number_floats(line, numbers);
-        if (ret != mInfo.dimension) {
-            std::cerr << "Fatal error: parse vertex line " << i << " dimension mismatch, expected "
-                        << mInfo.dimension << " got " << ret << ".\n";
-            throw std::runtime_error("parse vertex line dimension mismatch");
+        if (ret != columnCount) {
+            std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
+                        << columnCount << " got " << ret << ".\n";
+            throw std::runtime_error("parse line column count mismatch");
         }
-        for (size_t j = 0; j < mInfo.dimension; ++j) {
+        for (size_t j = 0; j < columnCount; ++j) {
             mGrid.vertices[i].coords[j] = numbers[j];
         }
-
-        // auto hashPos = line.find('#');
-        // if (hashPos != std::string::npos) line = line.substr(0, hashPos);
-        // stripComment(line);
-        // trim(line);
-        // std::istringstream ss(line);
-        // for (size_t j = 0; j < mInfo.dimension; ++j) {
-        //     ss >> mGrid.vertices[i].coords[j];
-        // }
     });
 }
 
@@ -526,13 +513,24 @@ py::array parse_fix_column_buffer(
 
     if (dtype.is(py::dtype::of<std::int32_t>())) {
         return parse_fix_column_buffer_as<std::int32_t>(
-            reader, comment, maxRows, columnCount, ndmin);
+            reader, comment, maxRows, columnCount, ndmin, maxThreads);
     }
 
     throw py::type_error("unsupported dtype");
 }
 
 
+template<typename T>
+static py::array parse_dynamic_column_buffer_as(
+    FastLineReader& infile,
+    const std::string& comment,
+    std::size_t maxRows,
+    std::string endChar, // 
+    std::int32_t ndmin,
+    std::int32_t maxThreads = 16
+) {
+
+}
 
 
 // this like csv data with space delimiter, 
@@ -575,22 +573,22 @@ py::array parse_dynamic_column_buffer(
 
     if (dtype.is(py::dtype::of<double>())) {
         return parse_dynamic_column_buffer_as<double>(
-            reader, comment, maxRows, ndmin);
+            reader, comment, maxRows, endChar, ndmin, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<float>())) {
         return parse_dynamic_column_buffer_as<float>(
-            reader, comment, maxRows, ndmin);
+            reader, comment, maxRows, endChar, ndmin, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<std::int64_t>())) {
         return parse_dynamic_column_buffer_as<std::int64_t>(
-            reader, comment, maxRows, ndmin);
+            reader, comment, maxRows, endChar, ndmin, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<std::int32_t>())) {
         return parse_dynamic_column_buffer_as<std::int32_t>(
-            reader, comment, maxRows, ndmin);
+            reader, comment, maxRows, endChar, ndmin, maxThreads);
     }
 
     throw py::type_error("unsupported dtype");
