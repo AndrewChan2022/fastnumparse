@@ -36,11 +36,13 @@ FAST_NUM_PARSE_API std::vector<T> from_file_csv(
     bool verbose = false
 );
 
+// this api only for c++ test, not for python
 template<typename T>
 FAST_NUM_PARSE_API std::vector<T> from_file_noncsv(
     const std::string& file,
     const std::string& comment,
     std::string endChar, // 
+    std::size_t nelement,
     std::int32_t maxThreads = 16,
     bool verbose = false
 );

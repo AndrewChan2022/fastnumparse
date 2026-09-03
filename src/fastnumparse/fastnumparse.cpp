@@ -21,6 +21,7 @@
 #include <vector>
 #include <array>
 #include <charconv>
+#include <execution>
 
 namespace py = pybind11;
 namespace dr = drjit;
@@ -698,11 +699,81 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
     FastLineReader& infile,
     const std::string& comment,
     std::string endChar, // 
+    std::size_t nelement,
     std::int32_t maxThreads = 16,
     bool verbose = false
 ) {
 
-    return {};
+    const auto totalStart = std::chrono::steady_clock::now();
+
+    // phase 1: parse to lines
+
+    // Reach until meet }, end of Locations section
+    std::string_view line;
+    std::vector<std::string_view> lines;
+    lines.reserve(nelement);
+    bool endCharFound = false;
+    size_t previousPosition = infile.position();
+    while (!endCharFound && infile.getline(line)) {
+        if (line.find(endChar) != std::string::npos) {
+            infile.setPosition(previousPosition);  // rewind to the previous position
+            endCharFound = true;
+        } else {
+            previousPosition = infile.position();  // save the current position before reading the next line
+            lines.push_back(line);
+        }
+    }
+
+    const auto collectLinesEnd = std::chrono::steady_clock::now();
+
+    // phase 2: parse to number
+    std::vector<T> values(nelement);
+    const auto allocateValuesEnd = std::chrono::steady_clock::now();
+
+    // counting pass
+    std::vector<int64_t> lineElementCounts;
+    lineElementCounts.resize(lines.size());
+    ParallelParseElement(lines, maxThreads, [&](const std::string_view& line, size_t i) {
+        auto numElements = counting_dynamic_char(line);
+        lineElementCounts[i] = static_cast<int64_t>(numElements);
+    });
+
+    // parse pass
+    std::vector<int64_t> lineElementOffset(lines.size() + 1, 0);
+    std::inclusive_scan(std::execution::par, lineElementCounts.begin(), lineElementCounts.end(), lineElementOffset.begin() + 1);
+    ParallelParseElement(lines, maxThreads, [&](const std::string_view& line, size_t i) {
+        std::vector<char> numbers;
+        numbers.reserve(lineElementCounts[i]);
+        auto numElements = parse_dynamic_char(line, numbers);
+
+        // std::cout << "location: line " << i << " parse " << numElements << " elements.\n";
+
+        auto offset = lineElementOffset[i];
+        for (size_t j = 0; j < numElements; ++j) {  
+            values[offset + j] = numbers[j];
+        }
+    });
+
+
+    const auto parallelParseEnd = std::chrono::steady_clock::now();
+    const auto elapsedMilliseconds = [](const auto& start, const auto& end) {
+        return std::chrono::duration<double, std::milli>(end - start).count();
+    };
+
+    if (verbose) {
+        std::cout
+            << "parse_fix_column_buffer_as_vector:\n"
+            << "  collect lines:   "
+            << elapsedMilliseconds(totalStart, collectLinesEnd) << " ms\n"
+            << "  allocate values: "
+            << elapsedMilliseconds(collectLinesEnd, allocateValuesEnd) << " ms\n"
+            << "  parallel parse:  "
+            << elapsedMilliseconds(allocateValuesEnd, parallelParseEnd) << " ms\n"
+            << "  total:           "
+            << elapsedMilliseconds(totalStart, parallelParseEnd) << " ms\n";
+    }
+
+    return values;
 }
 
 template<typename T>
@@ -710,6 +781,7 @@ static py::array parse_dynamic_column_buffer_as(
     FastLineReader& infile,
     const std::string& comment,
     std::string endChar, // 
+    std::size_t nelement,
     std::int32_t maxThreads = 16
 ) {
 
@@ -729,6 +801,7 @@ py::array from_string_buffer_noncsv(
     py::object dtypeArg,
     const std::string& comment,
     std::string endChar, // 
+    std::size_t nelement,
     std::int32_t maxThreads = 16
 ) {
     const py::buffer_info info = input.request();
@@ -787,6 +860,7 @@ std::vector<T> from_file_noncsv(
     const std::string& file,
     const std::string& comment,
     std::string endChar, // 
+    std::size_t nelement,
     std::int32_t maxThreads,
     bool verbose
 ) {
@@ -808,7 +882,7 @@ std::vector<T> from_file_noncsv(
     }
 
     auto values = parse_dynamic_column_buffer_as_vector<T>(
-        infile, comment, endChar, maxThreads, verbose);
+        infile, comment, endChar, nelement, maxThreads, verbose);
     return values;
 }
 
@@ -817,6 +891,7 @@ template FAST_NUM_PARSE_API std::vector<double> from_file_noncsv(
     const std::string& file,
     const std::string& comment,
     std::string endChar, // 
+    std::size_t nelement,
     std::int32_t maxThreads,
     bool verbose
 );
@@ -825,6 +900,7 @@ template FAST_NUM_PARSE_API std::vector<int64_t> from_file_noncsv(
     const std::string& file,
     const std::string& comment,
     std::string endChar, // 
+    std::size_t nelement,
     std::int32_t maxThreads,
     bool verbose
 );
