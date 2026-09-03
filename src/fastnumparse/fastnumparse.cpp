@@ -321,8 +321,8 @@ static size_t counting_dynamic_number(const std::string_view& line) {
     return count;
 }
 
-
-static size_t parse_dynamic_number_int64(const std::string_view& line, std::vector<int64_t>& numbers) {
+template<typename T>
+static size_t parse_dynamic_number_int64(const std::string_view& line, T* numbers) {
     const char* begin = line.data();
     const char* end   = begin + line.size();
 
@@ -359,7 +359,8 @@ static size_t parse_dynamic_number_int64(const std::string_view& line, std::vect
             break;
         }
 
-        numbers.push_back(value);
+        // numbers.push_back(value);
+        *(numbers++) = value;
         count++;
         p = r.ptr;
     }
@@ -403,7 +404,7 @@ static size_t counting_dynamic_char(const std::string_view& line) {
 }
 
 
-static size_t parse_dynamic_char(const std::string_view& line, std::vector<char>& numbers) {
+static size_t parse_dynamic_char(const std::string_view& line, char* numbers) {
     const char* begin = line.data();
     const char* end   = begin + line.size();
 
@@ -434,7 +435,8 @@ static size_t parse_dynamic_char(const std::string_view& line, std::vector<char>
         if (p >= end) break;
 
         char value = *p;   // <-- THIS is the parse
-        numbers.push_back(value);
+        // numbers.push_back(value);
+        *(numbers++) = value;
         ++count;
         ++p;
     }
@@ -742,16 +744,11 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
     std::vector<int64_t> lineElementOffset(lines.size() + 1, 0);
     std::inclusive_scan(std::execution::par, lineElementCounts.begin(), lineElementCounts.end(), lineElementOffset.begin() + 1);
     ParallelParseElement(lines, maxThreads, [&](const std::string_view& line, size_t i) {
-        std::vector<char> numbers;
-        numbers.reserve(lineElementCounts[i]);
-        auto numElements = parse_dynamic_char(line, numbers);
-
-        // std::cout << "location: line " << i << " parse " << numElements << " elements.\n";
-
         auto offset = lineElementOffset[i];
-        for (size_t j = 0; j < numElements; ++j) {  
-            values[offset + j] = numbers[j];
-        }
+        T* numbers = &values[offset];
+        parse_dynamic_char(line, numbers);
+
+        // std::cout << "location: line " << i << " parse " << numElements << " elements.\n";        
     });
 
 
