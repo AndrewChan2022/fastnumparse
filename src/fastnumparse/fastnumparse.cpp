@@ -49,6 +49,9 @@ namespace fastnumparse {
 /// 
 class FastLineReader {
 public:
+    FastLineReader(const FastLineReader&) = delete;
+    FastLineReader& operator=(const FastLineReader&) = delete;
+
     explicit FastLineReader(const std::string& file) {
         // file is text file
         std::ifstream inFile(file, std::ios::binary | std::ios::ate);

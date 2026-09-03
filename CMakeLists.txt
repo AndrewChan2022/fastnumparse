@@ -18,6 +18,8 @@ project(
     LANGUAGES CXX
 )
 
+target_compile_definitions(${PROJECT_NAME} PRIVATE FAST_NUM_PARSE_EXPORTS)
+
 set(PYBIND11_FINDPYTHON ON)
 set(NANOTHREAD_STATIC ON)
 add_subdirectory(dep/fast_float EXCLUDE_FROM_ALL)
