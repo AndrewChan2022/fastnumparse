@@ -194,7 +194,7 @@ def benchmark_noncsv_dataset(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
-    parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--number", type=int, default=1)
     args = parser.parse_args()
@@ -209,6 +209,7 @@ def main() -> None:
     print()
 
     for dataset in datasets:
+        # if not dataset.path.name.endswith("noncsv_int_244761.txt"): continue
         benchmark_dataset(
             dataset,
             threads=args.threads,
@@ -216,7 +217,8 @@ def main() -> None:
             number=args.number,
         )
 
-    for dataset in noncsv_datasets:
+    for _, dataset in enumerate(noncsv_datasets):
+        # if not dataset.path.name.endswith("noncsv_int_244761.txt"): continue
         benchmark_noncsv_dataset(
             dataset,
             threads=args.threads,

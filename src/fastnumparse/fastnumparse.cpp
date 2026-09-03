@@ -184,7 +184,7 @@ static void ParallelParseElement(
             parseOneLine(line, i);
         }    
     }, pool.get());
-    // std::cout << "block size:" << 1024*16 << std::endl;
+    std::cout << "block size:" << 1 * 8192 << " maxThreads: " << maxThreads << std::endl;
 }
 
 /// this is 20x faster than std::istringstream method
@@ -615,8 +615,9 @@ static std::pair<py::array, std::size_t> parse_fix_column_buffer_as(
 
     // phase 1: parse to lines
     // phase 2: parse to number
+    bool verbose = true;
     auto values = parse_fix_column_buffer_as_vector<T>(
-        infile, comment, maxRows, columnCount, maxThreads);
+        infile, comment, maxRows, columnCount, maxThreads, verbose);
 
     // phase 3: convert to np.array
     std::vector<py::ssize_t> shape;
@@ -770,7 +771,7 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
 
     if (verbose) {
         std::cout
-            << "parse_fix_column_buffer_as_vector:\n"
+            << "parse_dynamic_column_buffer_as_vector:\n"
             << "  collect lines:   "
             << elapsedMilliseconds(totalStart, collectLinesEnd) << " ms\n"
             << "  allocate values: "
@@ -794,8 +795,9 @@ static std::pair<py::array, std::size_t> parse_dynamic_column_buffer_as(
 ) {
     // phase 1: parse to lines
     // phase 2: parse to number
+    bool verbose = true;
     auto values = parse_dynamic_column_buffer_as_vector<T>(
-        infile, comment, endChar, nelement, maxThreads);
+        infile, comment, endChar, nelement, maxThreads, verbose);
 
     // phase 3: convert to np.array
     std::vector<py::ssize_t> shape;
@@ -873,45 +875,6 @@ std::pair<py::array, std::size_t> from_string_buffer_noncsv(
     throw py::type_error("unsupported dtype");
 }
 
-
-// this not like csv, 
-// but like many data with many rows, 
-// the total number count known, but number count per row unknown.
-// delimiter must be space
-// comment at tail and must start with #
-// parse line until meet endChar
-template<typename T>
-std::vector<T> from_file_noncsv(
-    const std::string& file,
-    const std::string& comment,
-    std::string endChar, // 
-    std::size_t nelement,
-    std::int32_t maxThreads,
-    bool verbose
-) {
-    // TODO: comment must be '#'
-    if (comment != "#") {
-        throw py::value_error("comment must be #");
-    }
-
-    const auto readStart = std::chrono::steady_clock::now();
-
-    FastLineReader infile(file);
-    
-    const auto readEnd = std::chrono::steady_clock::now();
-    const double readMilliseconds =
-        std::chrono::duration<double, std::milli>(readEnd - readStart).count();
-    if (verbose) {
-        std::cout << "from_file_csv FastLineReader: "
-                << readMilliseconds << " ms\n";
-    }
-
-    auto values = parse_dynamic_column_buffer_as_vector<T>(
-        infile, comment, endChar, nelement, maxThreads, verbose);
-    return values;
-}
-
-
 // this like csv data with space delimiter and # comment
 // each line fix column number, 
 // delimiter must be space
@@ -965,6 +928,44 @@ template FAST_NUM_PARSE_API std::vector<std::int64_t> from_file_csv<std::int64_t
     std::int32_t,
     bool
 );
+
+
+// this not like csv, 
+// but like many data with many rows, 
+// the total number count known, but number count per row unknown.
+// delimiter must be space
+// comment at tail and must start with #
+// parse line until meet endChar
+template<typename T>
+std::vector<T> from_file_noncsv(
+    const std::string& file,
+    const std::string& comment,
+    std::string endChar, // 
+    std::size_t nelement,
+    std::int32_t maxThreads,
+    bool verbose
+) {
+    // TODO: comment must be '#'
+    if (comment != "#") {
+        throw py::value_error("comment must be #");
+    }
+
+    const auto readStart = std::chrono::steady_clock::now();
+
+    FastLineReader infile(file);
+    
+    const auto readEnd = std::chrono::steady_clock::now();
+    const double readMilliseconds =
+        std::chrono::duration<double, std::milli>(readEnd - readStart).count();
+    if (verbose) {
+        std::cout << "from_file_csv FastLineReader: "
+                << readMilliseconds << " ms\n";
+    }
+
+    auto values = parse_dynamic_column_buffer_as_vector<T>(
+        infile, comment, endChar, nelement, maxThreads, verbose);
+    return values;
+}
 
 template FAST_NUM_PARSE_API std::vector<double> from_file_noncsv(
     const std::string& file,
