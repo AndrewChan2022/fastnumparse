@@ -1,4 +1,4 @@
-"""Compare fastnumparse and NumPy for all data/csv_*_*x*.txt files."""
+"""Compare fastnumparse and NumPy for the CSV and non-CSV datasets."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = ROOT / "data"
 DATASET_NAME = re.compile(r"^csv_(float|int)_(\d+)x(\d+)\.txt$")
+NONCSV_DATASET_NAME = re.compile(r"^noncsv_(char|int)_(\d+)\.txt$")
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,13 @@ class Dataset:
     dtype: np.dtype
     rows: int
     columns: int
+
+
+@dataclass(frozen=True)
+class NonCsvDataset:
+    path: Path
+    dtype: np.dtype
+    elements: int
 
 
 def discover_datasets(data_dir: Path) -> list[Dataset]:
@@ -42,6 +50,21 @@ def discover_datasets(data_dir: Path) -> list[Dataset]:
 
     if not datasets:
         raise FileNotFoundError(f"no csv_*_*x*.txt datasets found in {data_dir}")
+
+    return datasets
+
+
+def discover_noncsv_datasets(data_dir: Path) -> list[NonCsvDataset]:
+    datasets: list[NonCsvDataset] = []
+
+    for path in sorted(data_dir.glob("noncsv_*_*.txt")):
+        match = NONCSV_DATASET_NAME.fullmatch(path.name)
+        if match is None:
+            continue
+
+        value_kind, elements = match.groups()
+        dtype = np.dtype(np.int8 if value_kind == "char" else np.int64)
+        datasets.append(NonCsvDataset(path, dtype, int(elements)))
 
     return datasets
 
@@ -161,6 +184,82 @@ def benchmark_dataset(
     print()
 
 
+def benchmark_noncsv_dataset(
+    dataset: NonCsvDataset,
+    *,
+    threads: int,
+    repeat: int,
+    number: int,
+) -> None:
+    raw_buffer = dataset.path.read_bytes()
+    payload = raw_buffer.partition(b"}")[0]
+
+    def parse_fastnumparse() -> np.ndarray:
+        values, _ = fnp.from_string_buffer_noncsv(
+            raw_buffer,
+            0,
+            dataset.dtype,
+            "#",
+            "}",
+            dataset.elements,
+            threads,
+        )
+        return values
+
+    if dataset.dtype == np.dtype(np.int64):
+        numpy_text = remove_comments(payload.decode("ascii"))
+
+        def parse_numpy() -> np.ndarray:
+            return np.fromstring(numpy_text, dtype=dataset.dtype, sep=" ")
+
+        numpy_name = "np.fromstring"
+    else:
+        whitespace = b" \t\r\n\v\f"
+
+        def parse_numpy() -> np.ndarray:
+            compact = payload.translate(None, whitespace)
+            return np.frombuffer(compact, dtype=dataset.dtype)
+
+        numpy_name = "bytes.translate + np.frombuffer"
+
+    # Measure before validation so there are no explicit warm-up calls.
+    fast_best = measure(parse_fastnumparse, repeat=repeat, number=number)
+    numpy_best = measure(parse_numpy, repeat=repeat, number=number)
+
+    fast_values, next_offset = fnp.from_string_buffer_noncsv(
+        raw_buffer,
+        0,
+        dataset.dtype,
+        "#",
+        "}",
+        dataset.elements,
+        threads,
+    )
+    numpy_values = parse_numpy()
+
+    expected_shape = (dataset.elements,)
+    if fast_values.shape != expected_shape:
+        raise AssertionError(
+            f"{dataset.path.name}: got shape {fast_values.shape}, "
+            f"expected {expected_shape}"
+        )
+    if next_offset > len(raw_buffer) or not raw_buffer[next_offset:].lstrip().startswith(b"}"):
+        raise AssertionError(
+            f"{dataset.path.name}: end marker not found at byte {next_offset}"
+        )
+    np.testing.assert_array_equal(fast_values, numpy_values)
+
+    print(dataset.path.name)
+    print(f"  shape:                      {expected_shape}")
+    print(f"  dtype:                      {dataset.dtype}")
+    print(f"  size:                       {len(raw_buffer) / (1024 * 1024):.2f} MiB")
+    print(f"  fastnumparse:               {format_duration(fast_best):>10}")
+    print(f"  {numpy_name + ':':<28} {format_duration(numpy_best):>10}")
+    print(f"  speedup:                    {numpy_best / fast_best:>9.2f}x")
+    print("  np.loadtxt:                 not applicable (variable row widths)")
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
@@ -170,8 +269,9 @@ def main() -> None:
     args = parser.parse_args()
 
     datasets = discover_datasets(args.data_dir)
+    noncsv_datasets = discover_noncsv_datasets(args.data_dir)
 
-    print(f"datasets:     {len(datasets)}")
+    print(f"datasets:     {len(datasets) + len(noncsv_datasets)}")
     print(f"threads:      {args.threads} (0 means automatic)")
     print(f"measurements: {args.repeat} repeats x {args.number} calls")
     print("warm-up:      none")
@@ -182,6 +282,14 @@ def main() -> None:
 
     for dataset in datasets:
         benchmark_dataset(
+            dataset,
+            threads=args.threads,
+            repeat=args.repeat,
+            number=args.number,
+        )
+
+    for dataset in noncsv_datasets:
+        benchmark_noncsv_dataset(
             dataset,
             threads=args.threads,
             repeat=args.repeat,
