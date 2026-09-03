@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 #include <array>
 #include <charconv>
@@ -80,12 +81,16 @@ public:
         end_ = begin_ + len;
     }
 
-    void set_position(const std::size_t offset) {
+    void setPosition(const std::size_t offset) {
         const auto length = static_cast<std::size_t>(end_ - begin_);
         if (offset > length) {
             throw std::out_of_range("offset exceeds buffer size");
         }
         cur_ = begin_ + offset;
+    }
+
+    std::size_t position() const noexcept {
+        return static_cast<std::size_t>(cur_ - begin_);
     }
 
     // Zero-copy access (FASTEST)
@@ -518,15 +523,15 @@ static std::pair<py::array, std::size_t> parse_fix_column_buffer_as(
     py::array_t<T> result(shape);
     std::copy(values.begin(), values.end(), result.mutable_data());
     
-    return result;
+    return {std::move(result), infile.position()};
 }
 
-// this like csv data with space delimiter
-// each line fix column number, delimiter must be space
-// may have comment at tail
-// no other things like } at tail
-// return new position                      ---
-std::pair<py::array, std::size_t> from_buffer_csv(
+// this like csv data with space delimiter and # comment
+// each line fix column number, 
+// delimiter must be space
+// comment at tail and must start with #
+// not include line with end symbol such as }
+std::pair<py::array, std::size_t> from_string_buffer_csv(
     py::buffer input,
     std::size_t offset,
     py::object dtypeArg,
@@ -537,6 +542,11 @@ std::pair<py::array, std::size_t> from_buffer_csv(
     std::int32_t maxThreads = 16
 ) {
     const py::buffer_info info = input.request();
+
+    // TODO: comment must be '#'
+    if (comment != "#") {
+        throw py::value_error("comment must be #");
+    }
 
     // This parser expects a contiguous byte buffer.
     if (info.ndim != 1 || info.itemsize != 1 || info.strides[0] != 1) {
@@ -552,7 +562,7 @@ std::pair<py::array, std::size_t> from_buffer_csv(
 
     const auto* buffer = static_cast<const char*>(info.ptr);
     FastLineReader reader(buffer, buffer_size);
-    reader.set_position(offset);
+    reader.setPosition(offset);
 
     const py::dtype dtype = py::dtype::from_args(dtypeArg);
 
