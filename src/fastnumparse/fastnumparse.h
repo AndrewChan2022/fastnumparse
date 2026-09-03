@@ -25,6 +25,7 @@
 
 namespace fastnumparse {
 
+// this api only for c++ test, not for python
 template<typename T>
 FAST_NUM_PARSE_API std::vector<T> from_file_csv(
     const std::string& file,

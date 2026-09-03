@@ -653,79 +653,79 @@ template FAST_NUM_PARSE_API std::vector<std::int64_t> from_file_csv<std::int64_t
     std::int32_t
 );
 
-template<typename T>
-static py::array parse_dynamic_column_buffer_as(
-    FastLineReader& infile,
-    const std::string& comment,
-    std::size_t maxRows,
-    std::string endChar, // 
-    std::int32_t ndmin,
-    std::int32_t maxThreads = 16
-) {
+// template<typename T>
+// static py::array parse_dynamic_column_buffer_as(
+//     FastLineReader& infile,
+//     const std::string& comment,
+//     std::size_t maxRows,
+//     std::string endChar, // 
+//     std::int32_t ndmin,
+//     std::int32_t maxThreads = 16
+// ) {
 
-}
+// }
 
 
-// this like csv data with space delimiter, 
-// but each line may contain half row data or many row data
-// delimiter must be space
-// may have comment at tail
-// no other things like } at tail
-// return new position                      ---
-py::array from_buffer_noncsv(
-    py::buffer input,
-    std::size_t offset,
-    py::object dtypeArg,
-    const std::string& comment,
-    std::size_t maxRows,
-    std::string endChar, // 
-    std::int32_t ndmin,
-    std::int32_t maxThreads = 16
-) {
-    const py::buffer_info info = input.request();
+// // this like csv data with space delimiter, 
+// // but each line may contain half row data or many row data
+// // delimiter must be space
+// // may have comment at tail
+// // no other things like } at tail
+// // return new position                      ---
+// py::array from_buffer_noncsv(
+//     py::buffer input,
+//     std::size_t offset,
+//     py::object dtypeArg,
+//     const std::string& comment,
+//     std::size_t maxRows,
+//     std::string endChar, // 
+//     std::int32_t ndmin,
+//     std::int32_t maxThreads = 16
+// ) {
+//     const py::buffer_info info = input.request();
 
-    // This parser expects a contiguous byte buffer.
-    if (info.ndim != 1 || info.itemsize != 1 || info.strides[0] != 1) {
-        throw py::value_error(
-            "buffer must be a contiguous one-dimensional byte buffer");
-    }
+//     // This parser expects a contiguous byte buffer.
+//     if (info.ndim != 1 || info.itemsize != 1 || info.strides[0] != 1) {
+//         throw py::value_error(
+//             "buffer must be a contiguous one-dimensional byte buffer");
+//     }
 
-    const auto buffer_size = static_cast<std::size_t>(info.size);
+//     const auto buffer_size = static_cast<std::size_t>(info.size);
 
-    if (offset > buffer_size) {
-        throw py::value_error("offset exceeds buffer size");
-    }
+//     if (offset > buffer_size) {
+//         throw py::value_error("offset exceeds buffer size");
+//     }
 
-    const auto* buffer = static_cast<const char*>(info.ptr);
-    const char* begin = buffer + offset;
-    const std::size_t length = buffer_size - offset;
+//     const auto* buffer = static_cast<const char*>(info.ptr);
+//     const char* begin = buffer + offset;
+//     const std::size_t length = buffer_size - offset;
 
-    FastLineReader reader(begin, length);
+//     FastLineReader reader(begin, length);
 
-    const py::dtype dtype = py::dtype::from_args(dtypeArg);
+//     const py::dtype dtype = py::dtype::from_args(dtypeArg);
 
-    if (dtype.is(py::dtype::of<double>())) {
-        return parse_dynamic_column_buffer_as<double>(
-            reader, comment, maxRows, endChar, ndmin, maxThreads);
-    }
+//     if (dtype.is(py::dtype::of<double>())) {
+//         return parse_dynamic_column_buffer_as<double>(
+//             reader, comment, maxRows, endChar, ndmin, maxThreads);
+//     }
 
-    if (dtype.is(py::dtype::of<float>())) {
-        return parse_dynamic_column_buffer_as<float>(
-            reader, comment, maxRows, endChar, ndmin, maxThreads);
-    }
+//     if (dtype.is(py::dtype::of<float>())) {
+//         return parse_dynamic_column_buffer_as<float>(
+//             reader, comment, maxRows, endChar, ndmin, maxThreads);
+//     }
 
-    if (dtype.is(py::dtype::of<std::int64_t>())) {
-        return parse_dynamic_column_buffer_as<std::int64_t>(
-            reader, comment, maxRows, endChar, ndmin, maxThreads);
-    }
+//     if (dtype.is(py::dtype::of<std::int64_t>())) {
+//         return parse_dynamic_column_buffer_as<std::int64_t>(
+//             reader, comment, maxRows, endChar, ndmin, maxThreads);
+//     }
 
-    if (dtype.is(py::dtype::of<std::int32_t>())) {
-        return parse_dynamic_column_buffer_as<std::int32_t>(
-            reader, comment, maxRows, endChar, ndmin, maxThreads);
-    }
+//     if (dtype.is(py::dtype::of<std::int32_t>())) {
+//         return parse_dynamic_column_buffer_as<std::int32_t>(
+//             reader, comment, maxRows, endChar, ndmin, maxThreads);
+//     }
 
-    throw py::type_error("unsupported dtype");
-}
+//     throw py::type_error("unsupported dtype");
+// }
 
 } // namespace fastnumparse
 
