@@ -147,6 +147,7 @@ static void ParallelParseElement(
     int32_t maxThreads, 
     const ParseOneLineFunc& parseOneLine
 ) {
+    // if maxThread == 0, max cpu core
     maxThreads = maxThreads <= 0 ? core_count() - 1 : maxThreads;
     maxThreads = maxThreads <= 0 ? 1 : maxThreads;
     std::unique_ptr<Pool, decltype(&pool_destroy)> pool(
@@ -154,11 +155,10 @@ static void ParallelParseElement(
         &pool_destroy
     );
 
-    // if maxThread == 0, max cpu core
-
+    // task count
     const size_t nLines =  lines.size();
 
-    // tbb::blocked_range<size_t> r = tbb::blocked_range<size_t>(0, nLines);
+    // dr::blocked_range<size_t> r = dr::blocked_range<size_t>(0, nLines);
     dr::parallel_for(dr::blocked_range<size_t>(0, nLines), [&](dr::blocked_range<size_t> r)
     {
         // std:: cout << "parse range count: " << (r.end() - r.begin()) << "\n";
