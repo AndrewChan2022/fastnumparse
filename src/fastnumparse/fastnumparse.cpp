@@ -848,12 +848,12 @@ static py::array parse_dynamic_column_buffer_as(
 }
 
 
-// this like csv data with space delimiter, 
-// but each line may contain half row data or many row data
+// this not like csv, 
+// but like many data with many rows, 
+// the total number count known, but number count per row unknown.
 // delimiter must be space
-// may have comment at tail
-// no other things like } at tail
-// return new position                      ---
+// comment at tail and must start with #
+// parse line until meet endChar
 py::array from_string_buffer_noncsv(
     py::buffer input,
     std::size_t offset,
@@ -909,11 +909,12 @@ py::array from_string_buffer_noncsv(
 }
 
 
-// this like csv data with space delimiter and # comment
-// each line fix column number, 
+// this not like csv, 
+// but like many data with many rows, 
+// the total number count known, but number count per row unknown.
 // delimiter must be space
 // comment at tail and must start with #
-// not include line with end symbol such as }
+// parse line until meet endChar
 template<typename T>
 std::vector<T> from_file_noncsv(
     const std::string& file,
