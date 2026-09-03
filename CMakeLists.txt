@@ -18,6 +18,11 @@ project(
     LANGUAGES CXX
 )
 
+set(
+    FASTNUMPARSE_RUNTIME_OUTPUT_DIRECTORY
+    "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+)
+
 set(PYBIND11_FINDPYTHON ON)
 set(NANOTHREAD_STATIC ON)
 add_subdirectory(dep/fast_float EXCLUDE_FROM_ALL)

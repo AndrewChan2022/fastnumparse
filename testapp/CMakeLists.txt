@@ -6,16 +6,10 @@ target_compile_definitions(
     PRIVATE FASTNUMPARSE_DATA_DIR="${PROJECT_SOURCE_DIR}/data"
 )
 target_link_libraries(fastnumparse_testapp PRIVATE _fastnumparse)
-
-if(WIN32)
-    add_custom_command(
-        TARGET fastnumparse_testapp
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:_fastnumparse>
-                $<TARGET_FILE_DIR:fastnumparse_testapp>
-        VERBATIM
-    )
-endif()
+set_target_properties(
+    fastnumparse_testapp
+    PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${FASTNUMPARSE_RUNTIME_OUTPUT_DIRECTORY}"
+)
 
 add_test(NAME fastnumparse_cpp_test COMMAND fastnumparse_testapp)
