@@ -140,8 +140,14 @@ private:
 
 
 template <typename ParseOneLineFunc>
-static void ParallelParseElement(const std::vector<std::string_view>& lines, const ParseOneLineFunc& parseOneLine) {
+static void ParallelParseElement(
+    const std::vector<std::string_view>& lines, 
+    int32_t maxThreads, 
+    const ParseOneLineFunc& parseOneLine
+) {
     
+    // if maxThread == 0, max cpu core
+
     const size_t nLines =  lines.size();
 
     // tbb::blocked_range<size_t> r = tbb::blocked_range<size_t>(0, nLines);
@@ -411,6 +417,11 @@ static size_t parse_dynamic_char(const std::string_view& line, std::vector<char>
 template<typename T>
 static py::array parse_fix_column_buffer_as(
     FastLineReader& infile,
+    const std::string& comment,
+    std::size_t maxRows,
+    std::size_t columnCount,
+    std::int32_t ndmin,
+    std::int32_t maxThreads = 16
 ) {
     
     std::vector<std::string_view> vertexLines;
@@ -430,7 +441,7 @@ static py::array parse_fix_column_buffer_as(
     // this is 20x faster than below std::istringstream method
     // parallel 4x more faster
     // totally 80x faster
-    ParallelParseElement(vertexLines, [&](const std::string_view& line, size_t i) {
+    ParallelParseElement(vertexLines, maxThreads, [&](const std::string_view& line, size_t i) {
         std::array<double, 16> numbers;
         auto ret = parse_fix_number_floats(line, numbers);
         if (ret != mInfo.dimension) {
@@ -457,7 +468,7 @@ static py::array parse_fix_column_buffer_as(
 // each line fix column number, delimiter must be space
 // may have comment at tail
 // no other things like } at tail
-// return new position
+// return new position                      ---
 py::array parse_fix_column_buffer(
     py::buffer input,
     std::size_t offset,
@@ -465,7 +476,8 @@ py::array parse_fix_column_buffer(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t ndmin
+    std::int32_t ndmin,
+    std::int32_t maxThreads = 16
 ) {
     const py::buffer_info info = input.request();
 
@@ -491,22 +503,86 @@ py::array parse_fix_column_buffer(
 
     if (dtype.is(py::dtype::of<double>())) {
         return parse_fix_column_buffer_as<double>(
-            reader, comment, maxRows, columnCount, ndmin);
+            reader, comment, maxRows, columnCount, ndmin, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<float>())) {
         return parse_fix_column_buffer_as<float>(
-            reader, comment, maxRows, columnCount, ndmin);
+            reader, comment, maxRows, columnCount, ndmin, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<std::int64_t>())) {
         return parse_fix_column_buffer_as<std::int64_t>(
-            reader, comment, maxRows, columnCount, ndmin);
+            reader, comment, maxRows, columnCount, ndmin, maxThreads);
     }
 
     if (dtype.is(py::dtype::of<std::int32_t>())) {
         return parse_fix_column_buffer_as<std::int32_t>(
             reader, comment, maxRows, columnCount, ndmin);
+    }
+
+    throw py::type_error("unsupported dtype");
+}
+
+
+
+
+// this like csv data with space delimiter, 
+// but each line may contain half row data or many row data
+// delimiter must be space
+// may have comment at tail
+// no other things like } at tail
+// return new position                      ---
+py::array parse_dynamic_column_buffer(
+    py::buffer input,
+    std::size_t offset,
+    py::object dtypeArg,
+    const std::string& comment,
+    std::size_t maxRows,
+    std::string endChar, // 
+    std::int32_t ndmin,
+    std::int32_t maxThreads = 16
+) {
+    const py::buffer_info info = input.request();
+
+    // This parser expects a contiguous byte buffer.
+    if (info.ndim != 1 || info.itemsize != 1 || info.strides[0] != 1) {
+        throw py::value_error(
+            "buffer must be a contiguous one-dimensional byte buffer");
+    }
+
+    const auto buffer_size = static_cast<std::size_t>(info.size);
+
+    if (offset > buffer_size) {
+        throw py::value_error("offset exceeds buffer size");
+    }
+
+    const auto* buffer = static_cast<const char*>(info.ptr);
+    const char* begin = buffer + offset;
+    const std::size_t length = buffer_size - offset;
+
+    FastLineReader reader(begin, length);
+
+    const py::dtype dtype = py::dtype::from_args(dtypeArg);
+
+    if (dtype.is(py::dtype::of<double>())) {
+        return parse_dynamic_column_buffer_as<double>(
+            reader, comment, maxRows, ndmin);
+    }
+
+    if (dtype.is(py::dtype::of<float>())) {
+        return parse_dynamic_column_buffer_as<float>(
+            reader, comment, maxRows, ndmin);
+    }
+
+    if (dtype.is(py::dtype::of<std::int64_t>())) {
+        return parse_dynamic_column_buffer_as<std::int64_t>(
+            reader, comment, maxRows, ndmin);
+    }
+
+    if (dtype.is(py::dtype::of<std::int32_t>())) {
+        return parse_dynamic_column_buffer_as<std::int32_t>(
+            reader, comment, maxRows, ndmin);
     }
 
     throw py::type_error("unsupported dtype");
