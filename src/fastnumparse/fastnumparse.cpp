@@ -443,6 +443,9 @@ static py::array parse_fix_column_buffer_as(
     if (columnCount == 0) {
         throw py::value_error("columnCount cannot be zero");
     }
+    if (columnCount > 16) {
+        throw py::value_error("columnCount cannot exceed 16");
+    }
 
 
     // phase 1: parse to lines
