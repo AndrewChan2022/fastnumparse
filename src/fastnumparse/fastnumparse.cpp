@@ -664,6 +664,28 @@ py::array from_buffer_noncsv(
     throw py::type_error("unsupported dtype");
 }
 
+} // namespace fastnumparse
 
+PYBIND11_MODULE(_fastnumparse, module) {
+    module.doc() = "Native implementation for fastnumparse";
 
+    module.def(
+        "_native_version",
+        []() { return FASTNUMPARSE_VERSION; },
+        "Return the version compiled into the native extension."
+    );
+
+    module.def(
+        "from_string_buffer_csv",
+        &fastnumparse::from_string_buffer_csv,
+        py::arg("input"),
+        py::arg("offset"),
+        py::arg("dtype"),
+        py::arg("comment"),
+        py::arg("max_rows"),
+        py::arg("column_count"),
+        py::arg("ndmin"),
+        py::arg("max_threads") = 16,
+        "Parse csv like data from string buffer, fix rows and column, space delimeter and # comment."
+    );
 }

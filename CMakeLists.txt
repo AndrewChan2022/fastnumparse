@@ -26,7 +26,6 @@ add_subdirectory(dep/pybind11/2.13.6 EXCLUDE_FROM_ALL)
 pybind11_add_module(
     _fastnumparse
     MODULE
-    src/fastnumparse/bindings.cpp
     src/fastnumparse/fastnumparse.cpp
 )
 target_compile_features(_fastnumparse PRIVATE cxx_std_17)
