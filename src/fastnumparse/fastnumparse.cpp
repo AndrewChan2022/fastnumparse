@@ -510,11 +510,9 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
         throw py::value_error("columnCount cannot be zero");
     }
 
-    // TODO: parse_fix_number_xxx pass into buffer instead of std::array
-    // so we no column count limit
-    if (columnCount > 16) {
-        throw py::value_error("columnCount cannot exceed 16");
-    }
+    // if (columnCount > 16) {
+    //     throw py::value_error("columnCount cannot exceed 16");
+    // }
 
 
     // phase 1: parse to lines
