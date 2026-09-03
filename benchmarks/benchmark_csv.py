@@ -1,26 +1,48 @@
-"""Benchmark fastnumparse.from_string_buffer_csv against NumPy.
-
-Run after installing the project in the active environment:
-
-    python benchmarks/benchmark_from_string_buffer_csv.py
-"""
+"""Benchmark fastnumparse for every data/csv_*_*x*.txt dataset."""
 
 from __future__ import annotations
 
 import argparse
 import gc
-import io
+import re
 import timeit
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-import numpy as np
 import fastnumparse as fnp
+import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = ROOT / "data" / "csv_float_244768x3.txt"
-ROW_COUNT = 244768
+DEFAULT_DATA_DIR = ROOT / "data"
+DATASET_NAME = re.compile(r"^csv_(float|int)_(\d+)x(\d+)\.txt$")
+
+
+@dataclass(frozen=True)
+class Dataset:
+    path: Path
+    dtype: np.dtype
+    rows: int
+    columns: int
+
+
+def discover_datasets(data_dir: Path) -> list[Dataset]:
+    datasets: list[Dataset] = []
+
+    for path in sorted(data_dir.glob("csv_*_*x*.txt")):
+        match = DATASET_NAME.fullmatch(path.name)
+        if match is None:
+            continue
+
+        value_kind, rows, columns = match.groups()
+        dtype = np.dtype(np.float64 if value_kind == "float" else np.int64)
+        datasets.append(Dataset(path, dtype, int(rows), int(columns)))
+
+    if not datasets:
+        raise FileNotFoundError(f"no csv_*_*x*.txt datasets found in {data_dir}")
+
+    return datasets
 
 
 def measure(
@@ -28,10 +50,10 @@ def measure(
     *,
     repeat: int,
     number: int,
-) -> np.ndarray:
+) -> float:
     gc.collect()
     samples = timeit.repeat(function, repeat=repeat, number=number)
-    return np.asarray(samples, dtype=np.float64) / number
+    return min(samples) / number
 
 
 def format_duration(seconds: float) -> str:
@@ -40,67 +62,84 @@ def format_duration(seconds: float) -> str:
     return f"{seconds * 1e3:.2f} ms"
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--dtype", choices=("float32", "float64"), default="float64")
-    parser.add_argument("--columns", type=int, default=3)
-    parser.add_argument("--threads", type=int, default=0)
-    parser.add_argument("--repeat", type=int, default=7)
-    parser.add_argument("--number", type=int, default=7)
-    args = parser.parse_args()
-
-    dtype = np.dtype(args.dtype)
-    raw_buffer = args.input.read_bytes()
-    row_count = ROW_COUNT
+def benchmark_dataset(
+    dataset: Dataset,
+    *,
+    threads: int,
+    repeat: int,
+    number: int,
+) -> None:
+    raw_buffer = dataset.path.read_bytes()
 
     def parse_fastnumparse() -> np.ndarray:
         values, _ = fnp.from_string_buffer_csv(
             raw_buffer,
             0,
-            dtype,
+            dataset.dtype,
             "#",
-            row_count,
-            args.columns,
+            dataset.rows,
+            dataset.columns,
             2,
-            16 #args.threads,
+            threads,
         )
         return values
 
-    fast_values, next_offset = fnp.from_string_buffer_csv(
+    # Measure before validation so there is no explicit warm-up call.
+    best = measure(parse_fastnumparse, repeat=repeat, number=number)
+
+    values, next_offset = fnp.from_string_buffer_csv(
         raw_buffer,
         0,
-        dtype,
+        dataset.dtype,
         "#",
-        row_count,
-        args.columns,
+        dataset.rows,
+        dataset.columns,
         2,
-        args.threads,
+        threads,
     )
-
-    if next_offset != len(raw_buffer):
+    expected_shape = (dataset.rows, dataset.columns)
+    if values.shape != expected_shape:
         raise AssertionError(
-            f"parser stopped at byte {next_offset}, expected {len(raw_buffer)}"
+            f"{dataset.path.name}: got shape {values.shape}, "
+            f"expected {expected_shape}"
+        )
+    if next_offset > len(raw_buffer) or raw_buffer[next_offset:].strip():
+        raise AssertionError(
+            f"{dataset.path.name}: unparsed data remains after byte {next_offset}"
         )
 
-    # Warm both implementations before collecting samples.
-    parse_fastnumparse()
+    print(dataset.path.name)
+    print(f"  shape:        {expected_shape}")
+    print(f"  dtype:        {dataset.dtype}")
+    print(f"  size:         {len(raw_buffer) / (1024 * 1024):.2f} MiB")
+    print(f"  fastnumparse: {format_duration(best)} best per call")
+    print()
 
-    fast_times = measure(parse_fastnumparse, repeat=args.repeat, number=args.number)
 
-    fast_best = float(fast_times.min())
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--number", type=int, default=1)
+    args = parser.parse_args()
 
-    print(f"input:        {args.input}")
-    print(f"shape:        ({row_count}, {args.columns})")
-    print(f"dtype:        {dtype}")
+    datasets = discover_datasets(args.data_dir)
+
+    print(f"datasets:     {len(datasets)}")
     print(f"threads:      {args.threads} (0 means automatic)")
     print(f"measurements: {args.repeat} repeats x {args.number} calls")
-    print("note:         comment removal for np.fromstring is performed before timing")
-    print("              TextIO includes opening, reading, and decoding the file")
-    print("              BytesIO uses the buffer already loaded in memory")
+    print("warm-up:      none")
     print()
-    print(f"fastnumparse:             {format_duration(fast_best):>10} best per call")
-    print()
+
+    for dataset in datasets:
+        benchmark_dataset(
+            dataset,
+            threads=args.threads,
+            repeat=args.repeat,
+            number=args.number,
+        )
+
 
 if __name__ == "__main__":
     main()

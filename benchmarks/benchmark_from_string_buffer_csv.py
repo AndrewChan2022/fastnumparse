@@ -1,26 +1,49 @@
-"""Benchmark fastnumparse.from_string_buffer_csv against NumPy.
-
-Run after installing the project in the active environment:
-
-    python benchmarks/benchmark_from_string_buffer_csv.py
-"""
+"""Compare fastnumparse and NumPy for all data/csv_*_*x*.txt files."""
 
 from __future__ import annotations
 
 import argparse
 import gc
 import io
+import re
 import timeit
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-import numpy as np
 import fastnumparse as fnp
+import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = ROOT / "data" / "csv_float_244768x3.txt"
-ROW_COUNT = 244768
+DEFAULT_DATA_DIR = ROOT / "data"
+DATASET_NAME = re.compile(r"^csv_(float|int)_(\d+)x(\d+)\.txt$")
+
+
+@dataclass(frozen=True)
+class Dataset:
+    path: Path
+    dtype: np.dtype
+    rows: int
+    columns: int
+
+
+def discover_datasets(data_dir: Path) -> list[Dataset]:
+    datasets: list[Dataset] = []
+
+    for path in sorted(data_dir.glob("csv_*_*x*.txt")):
+        match = DATASET_NAME.fullmatch(path.name)
+        if match is None:
+            continue
+
+        value_kind, rows, columns = match.groups()
+        dtype = np.dtype(np.float64 if value_kind == "float" else np.int64)
+        datasets.append(Dataset(path, dtype, int(rows), int(columns)))
+
+    if not datasets:
+        raise FileNotFoundError(f"no csv_*_*x*.txt datasets found in {data_dir}")
+
+    return datasets
 
 
 def remove_comments(text: str) -> str:
@@ -33,10 +56,10 @@ def measure(
     *,
     repeat: int,
     number: int,
-) -> np.ndarray:
+) -> float:
     gc.collect()
     samples = timeit.repeat(function, repeat=repeat, number=number)
-    return np.asarray(samples, dtype=np.float64) / number
+    return min(samples) / number
 
 
 def format_duration(seconds: float) -> str:
@@ -45,119 +68,125 @@ def format_duration(seconds: float) -> str:
     return f"{seconds * 1e3:.2f} ms"
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--dtype", choices=("float32", "float64"), default="float64")
-    parser.add_argument("--columns", type=int, default=3)
-    parser.add_argument("--threads", type=int, default=0)
-    parser.add_argument("--repeat", type=int, default=1)
-    parser.add_argument("--number", type=int, default=1)
-    args = parser.parse_args()
-
-    dtype = np.dtype(args.dtype)
-    raw_buffer = args.input.read_bytes()
+def benchmark_dataset(
+    dataset: Dataset,
+    *,
+    threads: int,
+    repeat: int,
+    number: int,
+) -> None:
+    raw_buffer = dataset.path.read_bytes()
     numpy_text = remove_comments(raw_buffer.decode("ascii"))
-    row_count = ROW_COUNT
 
     def parse_fastnumparse() -> np.ndarray:
         values, _ = fnp.from_string_buffer_csv(
             raw_buffer,
             0,
-            dtype,
+            dataset.dtype,
             "#",
-            row_count,
-            args.columns,
+            dataset.rows,
+            dataset.columns,
             2,
-            args.threads,
+            threads,
         )
         return values
 
     def parse_numpy_fromstring() -> np.ndarray:
-        return np.fromstring(numpy_text, dtype=dtype, sep=" ").reshape(
-            row_count, args.columns
+        return np.fromstring(numpy_text, dtype=dataset.dtype, sep=" ").reshape(
+            dataset.rows, dataset.columns
         )
 
     def parse_numpy_loadtxt_textio() -> np.ndarray:
-        with args.input.open("r", encoding="utf-8") as input_file:
+        with dataset.path.open("r", encoding="ascii", newline="") as input_file:
             return np.loadtxt(
                 input_file,
-                dtype=dtype,
+                dtype=dataset.dtype,
                 comments="#",
-                max_rows=row_count,
+                max_rows=dataset.rows,
                 ndmin=2,
             )
 
     def parse_numpy_loadtxt_bytesio() -> np.ndarray:
         return np.loadtxt(
             io.BytesIO(raw_buffer),
-            dtype=dtype,
+            dtype=dataset.dtype,
             comments="#",
-            max_rows=row_count,
+            max_rows=dataset.rows,
             ndmin=2,
         )
+
+    # Measure before validation so there are no explicit warm-up calls.
+    fast_best = measure(parse_fastnumparse, repeat=repeat, number=number)
+    fromstring_best = measure(parse_numpy_fromstring, repeat=repeat, number=number)
+    loadtxt_textio_best = measure(
+        parse_numpy_loadtxt_textio, repeat=repeat, number=number
+    )
+    loadtxt_bytesio_best = measure(
+        parse_numpy_loadtxt_bytesio, repeat=repeat, number=number
+    )
 
     fast_values, next_offset = fnp.from_string_buffer_csv(
         raw_buffer,
         0,
-        dtype,
+        dataset.dtype,
         "#",
-        row_count,
-        args.columns,
+        dataset.rows,
+        dataset.columns,
         2,
-        args.threads,
+        threads,
     )
-    # fromstring_values = parse_numpy_fromstring()
-    # loadtxt_textio_values = parse_numpy_loadtxt_textio()
-    # loadtxt_bytesio_values = parse_numpy_loadtxt_bytesio()
+    fromstring_values = parse_numpy_fromstring()
+    loadtxt_textio_values = parse_numpy_loadtxt_textio()
+    loadtxt_bytesio_values = parse_numpy_loadtxt_bytesio()
 
-    # if next_offset != len(raw_buffer):
-    #     raise AssertionError(
-    #         f"parser stopped at byte {next_offset}, expected {len(raw_buffer)}"
-    #     )
-    # np.testing.assert_allclose(fast_values, fromstring_values)
-    # np.testing.assert_allclose(fast_values, loadtxt_textio_values)
-    # np.testing.assert_allclose(fast_values, loadtxt_bytesio_values)
+    if next_offset > len(raw_buffer) or raw_buffer[next_offset:].strip():
+        raise AssertionError(
+            f"{dataset.path.name}: unparsed data remains after byte {next_offset}"
+        )
+    np.testing.assert_allclose(fast_values, fromstring_values)
+    np.testing.assert_allclose(fast_values, loadtxt_textio_values)
+    np.testing.assert_allclose(fast_values, loadtxt_bytesio_values)
 
-    # # Warm both implementations before collecting samples.
-    # parse_fastnumparse()
-    # parse_numpy_fromstring()
-    # parse_numpy_loadtxt_textio()
-    # parse_numpy_loadtxt_bytesio()
+    print(dataset.path.name)
+    print(f"  shape:                      ({dataset.rows}, {dataset.columns})")
+    print(f"  dtype:                      {dataset.dtype}")
+    print(f"  size:                       {len(raw_buffer) / (1024 * 1024):.2f} MiB")
+    print(f"  fastnumparse:               {format_duration(fast_best):>10}")
+    print(f"  np.fromstring:              {format_duration(fromstring_best):>10}")
+    print(f"  np.loadtxt (TextIO file):   {format_duration(loadtxt_textio_best):>10}")
+    print(f"  np.loadtxt (BytesIO):       {format_duration(loadtxt_bytesio_best):>10}")
+    print(f"  speedup vs fromstring:      {fromstring_best / fast_best:>9.2f}x")
+    print(f"  speedup vs loadtxt TextIO:  {loadtxt_textio_best / fast_best:>9.2f}x")
+    print(f"  speedup vs loadtxt BytesIO: {loadtxt_bytesio_best / fast_best:>9.2f}x")
+    print()
 
-    fast_times = measure(parse_fastnumparse, repeat=args.repeat, number=args.number)
-    fromstring_times = measure(
-        parse_numpy_fromstring, repeat=args.repeat, number=args.number
-    )
-    loadtxt_textio_times = measure(
-        parse_numpy_loadtxt_textio, repeat=args.repeat, number=args.number
-    )
-    loadtxt_bytesio_times = measure(
-        parse_numpy_loadtxt_bytesio, repeat=args.repeat, number=args.number
-    )
 
-    fast_best = float(fast_times.min())
-    fromstring_best = float(fromstring_times.min())
-    loadtxt_textio_best = float(loadtxt_textio_times.min())
-    loadtxt_bytesio_best = float(loadtxt_bytesio_times.min())
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--number", type=int, default=1)
+    args = parser.parse_args()
 
-    print(f"input:        {args.input}")
-    print(f"shape:        ({row_count}, {args.columns})")
-    print(f"dtype:        {dtype}")
+    datasets = discover_datasets(args.data_dir)
+
+    print(f"datasets:     {len(datasets)}")
     print(f"threads:      {args.threads} (0 means automatic)")
     print(f"measurements: {args.repeat} repeats x {args.number} calls")
-    print("note:         comment removal for np.fromstring is performed before timing")
-    print("              TextIO includes opening, reading, and decoding the file")
-    print("              BytesIO uses the buffer already loaded in memory")
+    print("warm-up:      none")
+    print("notes:        np.fromstring comment removal is outside timing")
+    print("              loadtxt TextIO includes opening and reading the file")
+    print("              loadtxt BytesIO uses the preloaded buffer")
     print()
-    print(f"fastnumparse:             {format_duration(fast_best):>10} best per call")
-    print(f"np.fromstring:            {format_duration(fromstring_best):>10} best per call")
-    print(f"np.loadtxt (TextIO file): {format_duration(loadtxt_textio_best):>10} best per call")
-    print(f"np.loadtxt (BytesIO):     {format_duration(loadtxt_bytesio_best):>10} best per call")
-    print()
-    print(f"vs fromstring:            {fromstring_best / fast_best:>9.2f}x")
-    print(f"vs loadtxt TextIO:        {loadtxt_textio_best / fast_best:>9.2f}x")
-    print(f"vs loadtxt BytesIO:       {loadtxt_bytesio_best / fast_best:>9.2f}x")
+
+    for dataset in datasets:
+        benchmark_dataset(
+            dataset,
+            threads=args.threads,
+            repeat=args.repeat,
+            number=args.number,
+        )
 
 
 if __name__ == "__main__":
