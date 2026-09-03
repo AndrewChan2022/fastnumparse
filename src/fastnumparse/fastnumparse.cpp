@@ -443,6 +443,9 @@ static py::array parse_fix_column_buffer_as(
     if (columnCount == 0) {
         throw py::value_error("columnCount cannot be zero");
     }
+
+    // TODO: parse_fix_number_xxx pass into buffer instead of std::array
+    // so we no column count limit
     if (columnCount > 16) {
         throw py::value_error("columnCount cannot exceed 16");
     }
