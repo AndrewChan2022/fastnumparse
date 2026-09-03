@@ -140,7 +140,7 @@ def benchmark_dataset(
 
     # Measure before validation so there are no explicit warm-up calls.
     fast_best = measure(parse_fastnumparse, repeat=repeat, number=number)
-    fromstring_best = measure(parse_numpy_fromstring, repeat=repeat, number=number)
+    # fromstring_best = measure(parse_numpy_fromstring, repeat=repeat, number=number)
     loadtxt_textio_best = measure(
         parse_numpy_loadtxt_textio, repeat=repeat, number=number
     )
@@ -158,7 +158,7 @@ def benchmark_dataset(
         2,
         threads,
     )
-    fromstring_values = parse_numpy_fromstring()
+    # fromstring_values = parse_numpy_fromstring()
     loadtxt_textio_values = parse_numpy_loadtxt_textio()
     loadtxt_bytesio_values = parse_numpy_loadtxt_bytesio()
 
@@ -166,7 +166,7 @@ def benchmark_dataset(
         raise AssertionError(
             f"{dataset.path.name}: unparsed data remains after byte {next_offset}"
         )
-    np.testing.assert_allclose(fast_values, fromstring_values)
+    # np.testing.assert_allclose(fast_values, fromstring_values)
     np.testing.assert_allclose(fast_values, loadtxt_textio_values)
     np.testing.assert_allclose(fast_values, loadtxt_bytesio_values)
 
@@ -175,10 +175,10 @@ def benchmark_dataset(
     print(f"  dtype:                      {dataset.dtype}")
     print(f"  size:                       {len(raw_buffer) / (1024 * 1024):.2f} MiB")
     print(f"  fastnumparse:               {format_duration(fast_best):>10}")
-    print(f"  np.fromstring:              {format_duration(fromstring_best):>10}")
+    # print(f"  np.fromstring:              {format_duration(fromstring_best):>10}")
     print(f"  np.loadtxt (TextIO file):   {format_duration(loadtxt_textio_best):>10}")
     print(f"  np.loadtxt (BytesIO):       {format_duration(loadtxt_bytesio_best):>10}")
-    print(f"  speedup vs fromstring:      {fromstring_best / fast_best:>9.2f}x")
+    # print(f"  speedup vs fromstring:      {fromstring_best / fast_best:>9.2f}x")
     print(f"  speedup vs loadtxt TextIO:  {loadtxt_textio_best / fast_best:>9.2f}x")
     print(f"  speedup vs loadtxt BytesIO: {loadtxt_bytesio_best / fast_best:>9.2f}x")
     print()

@@ -536,8 +536,10 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
     // totally 80x faster
     ParallelParseElement(lines, maxThreads, [&](const std::string_view& inputLine, size_t i) {
         if constexpr (std::is_floating_point<T>::value) {
-            std::array<double, 16> numbers;
-            auto ret = parse_fix_number_floats(inputLine, numbers.data(), numbers.size());
+            // std::array<double, 16> numbers;
+            // auto ret = parse_fix_number_floats(inputLine, numbers.data(), numbers.size());
+            T* numbers = &values[i * columnCount];
+            auto ret = parse_fix_number_floats(inputLine, numbers, columnCount);
             if (ret != columnCount) {
                 std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
                             << columnCount << " got " << ret << ".\n";
@@ -548,12 +550,14 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
                     std::to_string(ret)
                 );
             }
-            for (size_t j = 0; j < columnCount; ++j) {
-                values[i * columnCount + j] = static_cast<T>(numbers[j]);
-            }
+            // for (size_t j = 0; j < columnCount; ++j) {
+            //     values[i * columnCount + j] = static_cast<T>(numbers[j]);
+            // }
         } else if constexpr (std::is_integral<T>::value) {
-            std::array<int64_t, 16> numbers;
-            auto ret = parse_fix_number_int64(inputLine, numbers.data(), numbers.size());
+            // std::array<int64_t, 16> numbers;
+            // auto ret = parse_fix_number_int64(inputLine, numbers.data(), numbers.size());
+            T* numbers = &values[i * columnCount];
+            auto ret = parse_fix_number_floats(inputLine, numbers, columnCount);
             if (ret != columnCount) {
                 std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
                             << columnCount << " got " << ret << ".\n";
@@ -564,14 +568,14 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
                     std::to_string(ret)
                 );
             }
-            for (size_t j = 0; j < columnCount; ++j) {
-                // if (numbers[j] < std::numeric_limits<T>::min() ||
-                //     numbers[j] > std::numeric_limits<T>::max()) {
-                //     throw std::out_of_range(
-                //         "integer value is outside the requested dtype range");
-                // }
-                values[i * columnCount + j] = static_cast<T>(numbers[j]);
-            }
+            // for (size_t j = 0; j < columnCount; ++j) {
+            //     // if (numbers[j] < std::numeric_limits<T>::min() ||
+            //     //     numbers[j] > std::numeric_limits<T>::max()) {
+            //     //     throw std::out_of_range(
+            //     //         "integer value is outside the requested dtype range");
+            //     // }
+            //     values[i * columnCount + j] = static_cast<T>(numbers[j]);
+            // }
         }
     });
 
@@ -691,61 +695,6 @@ std::pair<py::array, std::size_t> from_string_buffer_csv(
 
     throw py::type_error("unsupported dtype");
 }
-
-
-// this like csv data with space delimiter and # comment
-// each line fix column number, 
-// delimiter must be space
-// comment at tail and must start with #
-// not include line with end symbol such as }
-template<typename T>
-std::vector<T> from_file_csv(
-    const std::string& file,
-    const std::string& comment,
-    std::size_t maxRows,
-    std::size_t columnCount,
-    std::int32_t maxThreads,
-    bool verbose
-) {
-    // TODO: comment must be '#'
-    if (comment != "#") {
-        throw py::value_error("comment must be #");
-    }
-
-    const auto readStart = std::chrono::steady_clock::now();
-
-    FastLineReader infile(file);
-    
-    const auto readEnd = std::chrono::steady_clock::now();
-    const double readMilliseconds =
-        std::chrono::duration<double, std::milli>(readEnd - readStart).count();
-    if (verbose) {
-        std::cout << "from_file_csv FastLineReader: "
-                << readMilliseconds << " ms\n";
-    }
-
-    auto values = parse_fix_column_buffer_as_vector<T>(
-        infile, comment, maxRows, columnCount, maxThreads, verbose);
-    return values;
-}
-
-template FAST_NUM_PARSE_API std::vector<double> from_file_csv<double>(
-    const std::string&,
-    const std::string&,
-    std::size_t,
-    std::size_t,
-    std::int32_t,
-    bool
-);
-
-template FAST_NUM_PARSE_API std::vector<std::int64_t> from_file_csv<std::int64_t>(
-    const std::string&,
-    const std::string&,
-    std::size_t,
-    std::size_t,
-    std::int32_t,
-    bool
-);
 
 template<typename T>
 static std::vector<T> parse_dynamic_column_buffer_as_vector(
@@ -962,6 +911,60 @@ std::vector<T> from_file_noncsv(
     return values;
 }
 
+
+// this like csv data with space delimiter and # comment
+// each line fix column number, 
+// delimiter must be space
+// comment at tail and must start with #
+// not include line with end symbol such as }
+template<typename T>
+std::vector<T> from_file_csv(
+    const std::string& file,
+    const std::string& comment,
+    std::size_t maxRows,
+    std::size_t columnCount,
+    std::int32_t maxThreads,
+    bool verbose
+) {
+    // TODO: comment must be '#'
+    if (comment != "#") {
+        throw py::value_error("comment must be #");
+    }
+
+    const auto readStart = std::chrono::steady_clock::now();
+
+    FastLineReader infile(file);
+    
+    const auto readEnd = std::chrono::steady_clock::now();
+    const double readMilliseconds =
+        std::chrono::duration<double, std::milli>(readEnd - readStart).count();
+    if (verbose) {
+        std::cout << "from_file_csv FastLineReader: "
+                << readMilliseconds << " ms\n";
+    }
+
+    auto values = parse_fix_column_buffer_as_vector<T>(
+        infile, comment, maxRows, columnCount, maxThreads, verbose);
+    return values;
+}
+
+template FAST_NUM_PARSE_API std::vector<double> from_file_csv<double>(
+    const std::string&,
+    const std::string&,
+    std::size_t,
+    std::size_t,
+    std::int32_t,
+    bool
+);
+
+template FAST_NUM_PARSE_API std::vector<std::int64_t> from_file_csv<std::int64_t>(
+    const std::string&,
+    const std::string&,
+    std::size_t,
+    std::size_t,
+    std::int32_t,
+    bool
+);
 
 template FAST_NUM_PARSE_API std::vector<double> from_file_noncsv(
     const std::string& file,
