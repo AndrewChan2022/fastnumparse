@@ -450,32 +450,41 @@ static py::array parse_fix_column_buffer_as(
         lines.push_back(line);
     }
 
-    if (lines.size() > std::numeric_limits<std::size_t>::max() / columnCount) {
-        throw py::value_error("requested array is too large");
-    }
     std::vector<T> values(lines.size() * columnCount);
 
     // this is 20x faster than std::istringstream method
     // parallel 4x more faster
     // totally 80x faster
-    ParallelParseElement(lines, maxThreads, [&](std::string_view inputLine, size_t i) {
-        if (!comment.empty()) {
-            const size_t commentPos = inputLine.find(comment);
-            if (commentPos != std::string_view::npos) {
-                inputLine = inputLine.substr(0, commentPos);
-            }
-        }
-
-        size_t ret = 0;
+    ParallelParseElement(lines, maxThreads, [&](const std::string_view& inputLine, size_t i) {
         if constexpr (std::is_floating_point<T>::value) {
             std::array<double, 16> numbers{};
-            ret = parse_fix_number_floats(inputLine, numbers);
+            auto ret = parse_fix_number_floats(inputLine, numbers);
+            if (ret != columnCount) {
+                std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
+                            << columnCount << " got " << ret << ".\n";
+                throw std::runtime_error(
+                    "parse line " + std::to_string(i) +
+                    " column count mismatch: expected " +
+                    std::to_string(columnCount) + ", got " +
+                    std::to_string(ret)
+                );
+            }
             for (size_t j = 0; j < columnCount; ++j) {
                 values[i * columnCount + j] = static_cast<T>(numbers[j]);
             }
         } else if constexpr (std::is_integral<T>::value) {
             std::array<int64_t, 16> numbers{};
-            ret = parse_fix_number_int32(inputLine, numbers);
+            auot ret = parse_fix_number_int32(inputLine, numbers);
+            if (ret != columnCount) {
+                std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
+                            << columnCount << " got " << ret << ".\n";
+                throw std::runtime_error(
+                    "parse line " + std::to_string(i) +
+                    " column count mismatch: expected " +
+                    std::to_string(columnCount) + ", got " +
+                    std::to_string(ret)
+                );
+            }
             for (size_t j = 0; j < columnCount; ++j) {
                 if (numbers[j] < std::numeric_limits<T>::min() ||
                     numbers[j] > std::numeric_limits<T>::max()) {
@@ -484,14 +493,6 @@ static py::array parse_fix_column_buffer_as(
                 }
                 values[i * columnCount + j] = static_cast<T>(numbers[j]);
             }
-        }
-
-        if (ret != columnCount) {
-            throw std::runtime_error(
-                "parse line " + std::to_string(i) +
-                " column count mismatch: expected " +
-                std::to_string(columnCount) + ", got " +
-                std::to_string(ret));
         }
     });
 
