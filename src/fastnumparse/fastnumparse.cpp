@@ -429,7 +429,7 @@ static size_t parse_dynamic_char(const std::string_view& line, std::vector<char>
 }
 
 template<typename T>
-static py::array parse_fix_column_buffer_as(
+static std::pair<py::array, std::size_t> parse_fix_column_buffer_as(
     FastLineReader& infile,
     const std::string& comment,
     std::size_t maxRows,
@@ -517,6 +517,7 @@ static py::array parse_fix_column_buffer_as(
 
     py::array_t<T> result(shape);
     std::copy(values.begin(), values.end(), result.mutable_data());
+    
     return result;
 }
 
@@ -525,7 +526,7 @@ static py::array parse_fix_column_buffer_as(
 // may have comment at tail
 // no other things like } at tail
 // return new position                      ---
-py::array parse_fix_column_buffer(
+std::pair<py::array, std::size_t> from_buffer_csv(
     py::buffer input,
     std::size_t offset,
     py::object dtypeArg,
@@ -598,7 +599,7 @@ static py::array parse_dynamic_column_buffer_as(
 // may have comment at tail
 // no other things like } at tail
 // return new position                      ---
-py::array parse_dynamic_column_buffer(
+py::array from_buffer_noncsv(
     py::buffer input,
     std::size_t offset,
     py::object dtypeArg,
