@@ -964,6 +964,15 @@ template FAST_NUM_PARSE_API std::vector<int64_t> from_file_noncsv(
     bool verbose
 );
 
+template FAST_NUM_PARSE_API std::vector<char> from_file_noncsv(
+    const std::string& file,
+    const std::string& comment,
+    std::string endChar,
+    std::size_t nelement,
+    std::int32_t maxThreads,
+    bool verbose
+);
+
 
 } // namespace fastnumparse
 

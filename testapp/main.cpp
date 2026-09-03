@@ -43,6 +43,34 @@ bool test_csv(
     return true;
 }
 
+bool test_noncsv_char(
+    const fs::path& file,
+    std::size_t elementCount
+) {
+    const auto start = std::chrono::steady_clock::now();
+    const std::vector<char> values = fastnumparse::from_file_noncsv<char>(
+        file.string(), "#", "}", elementCount, 16, true);
+    const auto end = std::chrono::steady_clock::now();
+
+    if (values.size() != elementCount) {
+        std::cerr << file.filename().string()
+                  << ": expected " << elementCount
+                  << " values, got " << values.size() << '\n';
+        return false;
+    }
+
+    const double seconds = std::chrono::duration<double>(end - start).count();
+    const double milliseconds = seconds * 1000.0;
+    const double mebibytes = static_cast<double>(fs::file_size(file))
+        / (1024.0 * 1024.0);
+
+    std::cout << file.filename().string()
+              << ": parsed " << values.size() << " characters in "
+              << std::fixed << std::setprecision(2) << milliseconds
+              << " ms (" << mebibytes / seconds << " MiB/s)\n";
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     const fs::path dataDir = argc > 1
         ? fs::path(argv[1])
@@ -51,6 +79,8 @@ int main(int argc, char* argv[]) {
     bool passed = true;
     passed &= test_csv<double>(dataDir / "csv_float_244768x3.txt", 244768, 3);
     passed &= test_csv<std::int64_t>(dataDir / "csv_int_2854577x4.txt", 2854577, 4);
+    passed &= test_noncsv_char(
+        dataDir / "noncsv_char_2854577.txt", 2854577);
 
     return passed ? 0 : 1;
 }
