@@ -176,7 +176,8 @@ static void ParallelParseElement(
 /// this is 20x faster than std::istringstream method
 /// parallel 4x more faster
 /// totally 80x faster
-static size_t parse_fix_number_floats(const std::string_view& line, std::array<double, 16>& numbers) {
+template<typename T>
+static size_t parse_fix_number_floats(const std::string_view& line, std::array<T, 16>& numbers) {
     const char* begin = line.data();
     const char* end   = begin + line.size();
 
@@ -219,7 +220,8 @@ static size_t parse_fix_number_floats(const std::string_view& line, std::array<d
     return count;
 };
 
-static size_t parse_fix_number_int32(const std::string_view& line, std::array<int64_t, 16>& numbers) {
+template<typename T>
+static size_t parse_fix_number_int64(const std::string_view& line, std::array<T, 16>& numbers) {
     const char* begin = line.data();
     const char* end   = begin + line.size();
 
@@ -306,7 +308,7 @@ static size_t counting_dynamic_number(const std::string_view& line) {
 }
 
 
-static size_t parse_dynamic_number_int32(const std::string_view& line, std::vector<int64_t>& numbers) {
+static size_t parse_dynamic_number_int64(const std::string_view& line, std::vector<int64_t>& numbers) {
     const char* begin = line.data();
     const char* end   = begin + line.size();
 
@@ -442,14 +444,16 @@ static py::array parse_fix_column_buffer_as(
         throw py::value_error("columnCount cannot be zero");
     }
 
+
+    // phase 1: parse to lines
     std::string_view line;
-    
     std::vector<std::string_view> lines;
     lines.reserve(maxRows);
     while (lines.size() < maxRows && infile.getline(line)) {
         lines.push_back(line);
     }
 
+    // phase 2: parse to number
     std::vector<T> values(lines.size() * columnCount);
 
     // this is 20x faster than std::istringstream method
@@ -457,7 +461,7 @@ static py::array parse_fix_column_buffer_as(
     // totally 80x faster
     ParallelParseElement(lines, maxThreads, [&](const std::string_view& inputLine, size_t i) {
         if constexpr (std::is_floating_point<T>::value) {
-            std::array<double, 16> numbers{};
+            std::array<double, 16> numbers;
             auto ret = parse_fix_number_floats(inputLine, numbers);
             if (ret != columnCount) {
                 std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
@@ -473,8 +477,8 @@ static py::array parse_fix_column_buffer_as(
                 values[i * columnCount + j] = static_cast<T>(numbers[j]);
             }
         } else if constexpr (std::is_integral<T>::value) {
-            std::array<int64_t, 16> numbers{};
-            auot ret = parse_fix_number_int32(inputLine, numbers);
+            std::array<int64_t, 16> numbers;
+            auto ret = parse_fix_number_int64(inputLine, numbers);
             if (ret != columnCount) {
                 std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
                             << columnCount << " got " << ret << ".\n";
@@ -496,6 +500,7 @@ static py::array parse_fix_column_buffer_as(
         }
     });
 
+    // phase 3: convert to np.array
     std::vector<py::ssize_t> shape;
     if (ndmin < 2) {
         shape.push_back(static_cast<py::ssize_t>(values.size()));
