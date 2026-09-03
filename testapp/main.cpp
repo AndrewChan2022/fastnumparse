@@ -19,7 +19,7 @@ bool test_csv(
 ) {
     const auto start = std::chrono::steady_clock::now();
     const std::vector<T> values = fastnumparse::from_file_csv<T>(
-        file.string(), "#", rows, columns, 0);
+        file.string(), "#", rows, columns, 16);
     const auto end = std::chrono::steady_clock::now();
 
     const double seconds = std::chrono::duration<double>(end - start).count();
@@ -49,10 +49,8 @@ int main(int argc, char* argv[]) {
         : fs::path(FASTNUMPARSE_DATA_DIR);
 
     bool passed = true;
-    passed &= test_csv<double>(
-        dataDir / "csv_float_244768x3.txt", 244768, 3);
-    passed &= test_csv<std::int64_t>(
-        dataDir / "csv_int_2854577x4.txt", 2854577, 4);
+    passed &= test_csv<double>(dataDir / "csv_float_244768x3.txt", 244768, 3);
+    passed &= test_csv<std::int64_t>(dataDir / "csv_int_2854577x4.txt", 2854577, 4);
 
     return passed ? 0 : 1;
 }
