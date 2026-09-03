@@ -15,6 +15,7 @@
 #include <charconv>
 
 namespace py = pybind11;
+namespace dr = drjit;
 
 namespace fastnumparse {
 
@@ -145,20 +146,23 @@ static void ParallelParseElement(
     int32_t maxThreads, 
     const ParseOneLineFunc& parseOneLine
 ) {
-    
+    maxThreads = maxThreads <= 0 ? core_count() - 1 : maxThreads;
+    maxThreads = maxThreads <= 0 ? 1 : maxThreads;
+    Pool* pool = pool_create(threadCount);
+
     // if maxThread == 0, max cpu core
 
     const size_t nLines =  lines.size();
 
     // tbb::blocked_range<size_t> r = tbb::blocked_range<size_t>(0, nLines);
-    tbb::parallel_for(tbb::blocked_range<size_t>(0, nLines), [&](const tbb::blocked_range<size_t>& r) 
+    dr::parallel_for(dr::blocked_range<size_t>(0, nLines), [&](dr::blocked_range<size_t>& r)
     {
         // std:: cout << "parse range count: " << (r.end() - r.begin()) << "\n";
         for (size_t i = r.begin(); i != r.end(); ++i) {
             auto& line = lines[i];
             parseOneLine(line, i);
-        }
-    });
+        }    
+    }, pool);
 }
 
 /// this is 20x faster than std::istringstream method
