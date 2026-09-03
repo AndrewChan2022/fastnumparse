@@ -745,6 +745,7 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
         }
         lineElementCounts[i] = static_cast<int64_t>(numElements);
     });
+    const auto countingValuesEnd = std::chrono::steady_clock::now();
 
     // parse pass
     std::vector<int64_t> lineElementOffset(lines.size() + 1, 0);
@@ -776,8 +777,10 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
             << elapsedMilliseconds(totalStart, collectLinesEnd) << " ms\n"
             << "  allocate values: "
             << elapsedMilliseconds(collectLinesEnd, allocateValuesEnd) << " ms\n"
+            << "  counting values: "
+            << elapsedMilliseconds(allocateValuesEnd, countingValuesEnd) << " ms\n"
             << "  parallel parse:  "
-            << elapsedMilliseconds(allocateValuesEnd, parallelParseEnd) << " ms\n"
+            << elapsedMilliseconds(countingValuesEnd, parallelParseEnd) << " ms\n"
             << "  total:           "
             << elapsedMilliseconds(totalStart, parallelParseEnd) << " ms\n";
     }
