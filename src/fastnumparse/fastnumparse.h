@@ -32,7 +32,8 @@ FAST_NUM_PARSE_API std::vector<T> from_file_csv(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t maxThreads = 16
+    std::int32_t maxThreads = 16,
+    bool verbose = false
 );
 
 }

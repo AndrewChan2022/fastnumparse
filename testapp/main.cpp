@@ -19,7 +19,7 @@ bool test_csv(
 ) {
     const auto start = std::chrono::steady_clock::now();
     const std::vector<T> values = fastnumparse::from_file_csv<T>(
-        file.string(), "#", rows, columns, 16);
+        file.string(), "#", rows, columns, 16, true);
     const auto end = std::chrono::steady_clock::now();
 
     const double seconds = std::chrono::duration<double>(end - start).count();

@@ -7,6 +7,7 @@
 #include "fastnumparse.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
@@ -446,8 +447,11 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t maxThreads = 16
+    std::int32_t maxThreads = 16,
+    bool verbose = false
 ) {
+    const auto totalStart = std::chrono::steady_clock::now();
+
     if (columnCount == 0) {
         throw py::value_error("columnCount cannot be zero");
     }
@@ -463,12 +467,15 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
     std::string_view line;
     std::vector<std::string_view> lines;
     lines.reserve(maxRows);
-    while (lines.size() < maxRows && infile.getline(line)) {
+    while (lines.size() < maxRows) {
+        infile.getline(line);
         lines.push_back(line);
     }
+    const auto collectLinesEnd = std::chrono::steady_clock::now();
 
     // phase 2: parse to number
     std::vector<T> values(lines.size() * columnCount);
+    const auto allocateValuesEnd = std::chrono::steady_clock::now();
 
     // this is 20x faster than std::istringstream method
     // parallel 4x more faster
@@ -513,6 +520,24 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
             }
         }
     });
+
+    const auto parallelParseEnd = std::chrono::steady_clock::now();
+    const auto elapsedMilliseconds = [](const auto& start, const auto& end) {
+        return std::chrono::duration<double, std::milli>(end - start).count();
+    };
+
+    if (verbose) {
+        std::cout
+            << "parse_fix_column_buffer_as_vector:\n"
+            << "  collect lines:   "
+            << elapsedMilliseconds(totalStart, collectLinesEnd) << " ms\n"
+            << "  allocate values: "
+            << elapsedMilliseconds(collectLinesEnd, allocateValuesEnd) << " ms\n"
+            << "  parallel parse:  "
+            << elapsedMilliseconds(allocateValuesEnd, parallelParseEnd) << " ms\n"
+            << "  total:           "
+            << elapsedMilliseconds(totalStart, parallelParseEnd) << " ms\n";
+    }
 
     return values;
 }
@@ -625,16 +650,28 @@ std::vector<T> from_file_csv(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t maxThreads
+    std::int32_t maxThreads,
+    bool verbose
 ) {
     // TODO: comment must be '#'
     if (comment != "#") {
         throw py::value_error("comment must be #");
     }
 
+    const auto readStart = std::chrono::steady_clock::now();
+
     FastLineReader infile(file);
+    
+    const auto readEnd = std::chrono::steady_clock::now();
+    const double readMilliseconds =
+        std::chrono::duration<double, std::milli>(readEnd - readStart).count();
+    if (verbose) {
+        std::cout << "from_file_csv FastLineReader: "
+                << readMilliseconds << " ms\n";
+    }
+
     auto values = parse_fix_column_buffer_as_vector<T>(
-        infile, comment, maxRows, columnCount, maxThreads);
+        infile, comment, maxRows, columnCount, maxThreads, verbose);
     return values;
 }
 
@@ -643,7 +680,8 @@ template FAST_NUM_PARSE_API std::vector<double> from_file_csv<double>(
     const std::string&,
     std::size_t,
     std::size_t,
-    std::int32_t
+    std::int32_t,
+    bool
 );
 
 template FAST_NUM_PARSE_API std::vector<std::int64_t> from_file_csv<std::int64_t>(
@@ -651,7 +689,8 @@ template FAST_NUM_PARSE_API std::vector<std::int64_t> from_file_csv<std::int64_t
     const std::string&,
     std::size_t,
     std::size_t,
-    std::int32_t
+    std::int32_t,
+    bool
 );
 
 // template<typename T>
