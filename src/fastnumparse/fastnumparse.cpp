@@ -637,7 +637,7 @@ std::vector<T> from_file_csv(
     return values;
 }
 
-template std::vector<double> from_file_csv<double>(
+template FAST_NUM_PARSE_API std::vector<double> from_file_csv<double>(
     const std::string&,
     const std::string&,
     std::size_t,
@@ -645,7 +645,7 @@ template std::vector<double> from_file_csv<double>(
     std::int32_t
 );
 
-template std::vector<std::int64_t> from_file_csv<std::int64_t>(
+template FAST_NUM_PARSE_API std::vector<std::int64_t> from_file_csv<std::int64_t>(
     const std::string&,
     const std::string&,
     std::size_t,

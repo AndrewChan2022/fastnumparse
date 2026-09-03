@@ -18,24 +18,26 @@ project(
     LANGUAGES CXX
 )
 
-target_compile_definitions(${PROJECT_NAME} PRIVATE FAST_NUM_PARSE_EXPORTS)
-
 set(PYBIND11_FINDPYTHON ON)
 set(NANOTHREAD_STATIC ON)
 add_subdirectory(dep/fast_float EXCLUDE_FROM_ALL)
 add_subdirectory(dep/nanothread EXCLUDE_FROM_ALL)
 add_subdirectory(dep/pybind11/2.13.6 EXCLUDE_FROM_ALL)
 
-pybind11_add_module(
-    _fastnumparse
-    MODULE
-    src/fastnumparse/fastnumparse.cpp
-)
-target_compile_features(_fastnumparse PRIVATE cxx_std_17)
-target_compile_definitions(
-    _fastnumparse
-    PRIVATE FASTNUMPARSE_VERSION="${PROJECT_VERSION}"
-)
-target_link_libraries(_fastnumparse PRIVATE fast_float nanothread)
+add_subdirectory(src/fastnumparse)
 
-install(TARGETS _fastnumparse LIBRARY DESTINATION fastnumparse)
+set(FASTNUMPARSE_BUILD_TESTAPP_DEFAULT ON)
+if(SKBUILD)
+    set(FASTNUMPARSE_BUILD_TESTAPP_DEFAULT OFF)
+endif()
+
+option(
+    FASTNUMPARSE_BUILD_TESTAPP
+    "Build the fastnumparse C++ test application"
+    ${FASTNUMPARSE_BUILD_TESTAPP_DEFAULT}
+)
+
+if(FASTNUMPARSE_BUILD_TESTAPP)
+    enable_testing()
+    add_subdirectory(testapp)
+endif()
