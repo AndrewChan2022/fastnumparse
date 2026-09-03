@@ -19,6 +19,7 @@ project(
 )
 
 set(PYBIND11_FINDPYTHON ON)
+set(NANOTHREAD_STATIC ON)
 add_subdirectory(dep/fast_float EXCLUDE_FROM_ALL)
 add_subdirectory(dep/nanothread EXCLUDE_FROM_ALL)
 add_subdirectory(dep/pybind11/2.13.6 EXCLUDE_FROM_ALL)
