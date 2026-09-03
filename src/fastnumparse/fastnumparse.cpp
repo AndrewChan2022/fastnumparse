@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -148,21 +149,24 @@ static void ParallelParseElement(
 ) {
     maxThreads = maxThreads <= 0 ? core_count() - 1 : maxThreads;
     maxThreads = maxThreads <= 0 ? 1 : maxThreads;
-    Pool* pool = pool_create(threadCount);
+    std::unique_ptr<Pool, decltype(&pool_destroy)> pool(
+        pool_create(static_cast<uint32_t>(maxThreads)),
+        &pool_destroy
+    );
 
     // if maxThread == 0, max cpu core
 
     const size_t nLines =  lines.size();
 
     // tbb::blocked_range<size_t> r = tbb::blocked_range<size_t>(0, nLines);
-    dr::parallel_for(dr::blocked_range<size_t>(0, nLines), [&](dr::blocked_range<size_t>& r)
+    dr::parallel_for(dr::blocked_range<size_t>(0, nLines), [&](dr::blocked_range<size_t> r)
     {
         // std:: cout << "parse range count: " << (r.end() - r.begin()) << "\n";
         for (size_t i = r.begin(); i != r.end(); ++i) {
             auto& line = lines[i];
             parseOneLine(line, i);
         }    
-    }, pool);
+    }, pool.get());
 }
 
 /// this is 20x faster than std::istringstream method
