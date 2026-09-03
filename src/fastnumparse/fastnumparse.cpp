@@ -836,15 +836,26 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
 }
 
 template<typename T>
-static py::array parse_dynamic_column_buffer_as(
+static std::pair<py::array, std::size_t> parse_dynamic_column_buffer_as(
     FastLineReader& infile,
     const std::string& comment,
     std::string endChar, // 
     std::size_t nelement,
     std::int32_t maxThreads = 16
 ) {
+    // phase 1: parse to lines
+    // phase 2: parse to number
+    auto values = parse_dynamic_column_buffer_as_vector<T>(
+        infile, comment, endChar, nelement, maxThreads);
 
-    return {};
+    // phase 3: convert to np.array
+    std::vector<py::ssize_t> shape;
+    shape.push_back(static_cast<py::ssize_t>(values.size()));
+
+    py::array_t<T> result(shape);
+    std::copy(values.begin(), values.end(), result.mutable_data());
+    
+    return {std::move(result), infile.position()};
 }
 
 
@@ -854,7 +865,7 @@ static py::array parse_dynamic_column_buffer_as(
 // delimiter must be space
 // comment at tail and must start with #
 // parse line until meet endChar
-py::array from_string_buffer_noncsv(
+std::pair<py::array, std::size_t> from_string_buffer_noncsv(
     py::buffer input,
     std::size_t offset,
     py::object dtypeArg,
@@ -884,6 +895,11 @@ py::array from_string_buffer_noncsv(
     FastLineReader reader(begin, length);
 
     const py::dtype dtype = py::dtype::from_args(dtypeArg);
+
+    if (dtype.is(py::dtype::of<char>())) {
+        return parse_dynamic_column_buffer_as<char>(
+            reader, comment, endChar, maxThreads);
+    }
 
     if (dtype.is(py::dtype::of<double>())) {
         return parse_dynamic_column_buffer_as<double>(
