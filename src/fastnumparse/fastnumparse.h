@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 #include <string>
 
@@ -11,7 +12,6 @@ std::vector<T> from_file_csv(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t ndmin,
     std::int32_t maxThreads = 16
 );
 

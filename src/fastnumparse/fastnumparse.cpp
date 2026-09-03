@@ -1,9 +1,10 @@
-#include "./fastnumparse.h"
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <fast_float/fast_float.h>
 #include <nanothread/nanothread.h>
+
+#include "fastnumparse.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -141,6 +142,7 @@ public:
     }
 
 private:
+
     std::ifstream inFile_;
     std::vector<char> buffer_;
     const char* begin_ = nullptr;   // beginning of the full buffer
@@ -435,16 +437,13 @@ static size_t parse_dynamic_char(const std::string_view& line, std::vector<char>
 }
 
 template<typename T>
-static std::pair<std::vecotr<T>, std::size_t> parse_fix_column_buffer_as_vector(
+static std::vector<T> parse_fix_column_buffer_as_vector(
     FastLineReader& infile,
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
     std::int32_t maxThreads = 16
 ) {
-    if (ndmin < 0 || ndmin > 2) {
-        throw py::value_error("ndmin must be 0, 1, or 2");
-    }
     if (columnCount == 0) {
         throw py::value_error("columnCount cannot be zero");
     }
@@ -511,7 +510,7 @@ static std::pair<std::vecotr<T>, std::size_t> parse_fix_column_buffer_as_vector(
         }
     });
 
-    return {std::move(values), infile.position()};
+    return values;
 }
 
 template<typename T>
@@ -526,78 +525,18 @@ static std::pair<py::array, std::size_t> parse_fix_column_buffer_as(
     if (ndmin < 0 || ndmin > 2) {
         throw py::value_error("ndmin must be 0, 1, or 2");
     }
-    if (columnCount == 0) {
-        throw py::value_error("columnCount cannot be zero");
-    }
-
-    // TODO: parse_fix_number_xxx pass into buffer instead of std::array
-    // so we no column count limit
-    if (columnCount > 16) {
-        throw py::value_error("columnCount cannot exceed 16");
-    }
-
 
     // phase 1: parse to lines
-    std::string_view line;
-    std::vector<std::string_view> lines;
-    lines.reserve(maxRows);
-    while (lines.size() < maxRows && infile.getline(line)) {
-        lines.push_back(line);
-    }
-
     // phase 2: parse to number
-    std::vector<T> values(lines.size() * columnCount);
-
-    // this is 20x faster than std::istringstream method
-    // parallel 4x more faster
-    // totally 80x faster
-    ParallelParseElement(lines, maxThreads, [&](const std::string_view& inputLine, size_t i) {
-        if constexpr (std::is_floating_point<T>::value) {
-            std::array<double, 16> numbers;
-            auto ret = parse_fix_number_floats(inputLine, numbers.data(), numbers.size());
-            if (ret != columnCount) {
-                std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
-                            << columnCount << " got " << ret << ".\n";
-                throw std::runtime_error(
-                    "parse line " + std::to_string(i) +
-                    " column count mismatch: expected " +
-                    std::to_string(columnCount) + ", got " +
-                    std::to_string(ret)
-                );
-            }
-            for (size_t j = 0; j < columnCount; ++j) {
-                values[i * columnCount + j] = static_cast<T>(numbers[j]);
-            }
-        } else if constexpr (std::is_integral<T>::value) {
-            std::array<int64_t, 16> numbers;
-            auto ret = parse_fix_number_int64(inputLine, numbers.data(), numbers.size());
-            if (ret != columnCount) {
-                std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
-                            << columnCount << " got " << ret << ".\n";
-                throw std::runtime_error(
-                    "parse line " + std::to_string(i) +
-                    " column count mismatch: expected " +
-                    std::to_string(columnCount) + ", got " +
-                    std::to_string(ret)
-                );
-            }
-            for (size_t j = 0; j < columnCount; ++j) {
-                // if (numbers[j] < std::numeric_limits<T>::min() ||
-                //     numbers[j] > std::numeric_limits<T>::max()) {
-                //     throw std::out_of_range(
-                //         "integer value is outside the requested dtype range");
-                // }
-                values[i * columnCount + j] = static_cast<T>(numbers[j]);
-            }
-        }
-    });
+    auto values = parse_fix_column_buffer_as_vector<T>(
+        infile, comment, maxRows, columnCount, maxThreads);
 
     // phase 3: convert to np.array
     std::vector<py::ssize_t> shape;
     if (ndmin < 2) {
         shape.push_back(static_cast<py::ssize_t>(values.size()));
     } else {
-        shape.push_back(static_cast<py::ssize_t>(lines.size()));
+        shape.push_back(static_cast<py::ssize_t>(values.size() / columnCount));
         shape.push_back(static_cast<py::ssize_t>(columnCount));
     }
 
@@ -682,7 +621,7 @@ std::vector<T> from_file_csv(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t maxThreads = 16
+    std::int32_t maxThreads
 ) {
     // TODO: comment must be '#'
     if (comment != "#") {
@@ -690,9 +629,9 @@ std::vector<T> from_file_csv(
     }
 
     FastLineReader infile(file);
-    parse_fix_column_buffer_as_vector<T>(infile, comment, maxRows, columnCount, maxThreads);
-
-    throw py::type_error("unsupported dtype");
+    auto values = parse_fix_column_buffer_as_vector<T>(
+        infile, comment, maxRows, columnCount, maxThreads);
+    return values;
 }
 
 template std::vector<double> from_file_csv<double>(
