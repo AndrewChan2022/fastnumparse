@@ -177,7 +177,7 @@ static void ParallelParseElement(
 /// parallel 4x more faster
 /// totally 80x faster
 template<typename T>
-static size_t parse_fix_number_floats(const std::string_view& line, std::array<T, 16>& numbers) {
+static size_t parse_fix_number_floats(const std::string_view& line, T* numbers, size_t capacity) {
     const char* begin = line.data();
     const char* end   = begin + line.size();
 
@@ -199,7 +199,7 @@ static size_t parse_fix_number_floats(const std::string_view& line, std::array<T
     size_t count = 0;
     const char* p = begin;
 
-    while (p < end && count < numbers.size()) {
+    while (p < end && count < capacity) {
         // skip spaces between tokens
         while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
             ++p;
@@ -221,7 +221,7 @@ static size_t parse_fix_number_floats(const std::string_view& line, std::array<T
 };
 
 template<typename T>
-static size_t parse_fix_number_int64(const std::string_view& line, std::array<T, 16>& numbers) {
+static size_t parse_fix_number_int64(const std::string_view& line, T* numbers, size_t capacity) {
     const char* begin = line.data();
     const char* end   = begin + line.size();
 
@@ -243,7 +243,7 @@ static size_t parse_fix_number_int64(const std::string_view& line, std::array<T,
     size_t count = 0;
     const char* p = begin;
 
-    while (p < end && count < numbers.size()) {
+    while (p < end && count < capacity) {
         // skip whitespace
         while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
             ++p;
@@ -465,7 +465,7 @@ static py::array parse_fix_column_buffer_as(
     ParallelParseElement(lines, maxThreads, [&](const std::string_view& inputLine, size_t i) {
         if constexpr (std::is_floating_point<T>::value) {
             std::array<double, 16> numbers;
-            auto ret = parse_fix_number_floats(inputLine, numbers);
+            auto ret = parse_fix_number_floats(inputLine, numbers.data(), numbers.size());
             if (ret != columnCount) {
                 std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
                             << columnCount << " got " << ret << ".\n";
@@ -481,7 +481,7 @@ static py::array parse_fix_column_buffer_as(
             }
         } else if constexpr (std::is_integral<T>::value) {
             std::array<int64_t, 16> numbers;
-            auto ret = parse_fix_number_int64(inputLine, numbers);
+            auto ret = parse_fix_number_int64(inputLine, numbers.data(), numbers.size());
             if (ret != columnCount) {
                 std::cerr << "Fatal error: parse line " << i << " columnCount mismatch, expected "
                             << columnCount << " got " << ret << ".\n";
