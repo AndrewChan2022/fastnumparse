@@ -221,12 +221,14 @@ static size_t parse_fix_number_floats(const std::string_view& line, T* numbers, 
 
         if (p >= end) break;
 
+        // parse
         auto r = fast_float::from_chars(p, end, numbers[count]);
         if (r.ec != std::errc()) {
             // stop on parse error
             break;
         }
 
+        // marching
         p = r.ptr;
         ++count;
     }
@@ -265,6 +267,7 @@ static size_t parse_fix_number_int64(const std::string_view& line, T* numbers, s
 
         if (p >= end) break;
 
+        // parse
         int64_t value;
         auto r = std::from_chars(p, end, value);
         if (r.ec != std::errc()) {
@@ -272,6 +275,7 @@ static size_t parse_fix_number_int64(const std::string_view& line, T* numbers, s
             break;
         }
 
+        // marching
         numbers[count++] = value;
         p = r.ptr;
     }
@@ -322,6 +326,53 @@ static size_t counting_dynamic_number(const std::string_view& line) {
 }
 
 template<typename T>
+static size_t parse_dynamic_number_float(const std::string_view& line, T* numbers) {
+    const char* begin = line.data();
+    const char* end   = begin + line.size();
+
+    // remove comment
+    if (const char* hash = static_cast<const char*>(memchr(begin, '#', end - begin))) {
+        end = hash;
+    }
+
+    // trim leading spaces
+    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+        ++begin;
+    }
+
+    // trim trailing spaces
+    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+        --end;
+    }
+
+    size_t count = 0;
+    const char* p = begin;
+
+    while (p < end) {
+        // skip whitespace
+        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+            ++p;
+        }
+
+        if (p >= end) break;
+
+        // parse
+        auto r = fast_float::from_chars(p, end, numbers[count]);
+        if (r.ec != std::errc()) {
+            // stop on parse error
+            break;
+        }
+
+        // marching
+        p = r.ptr;
+        ++count;
+    }
+
+    return count;
+}
+
+
+template<typename T>
 static size_t parse_dynamic_number_int64(const std::string_view& line, T* numbers) {
     const char* begin = line.data();
     const char* end   = begin + line.size();
@@ -352,6 +403,7 @@ static size_t parse_dynamic_number_int64(const std::string_view& line, T* number
 
         if (p >= end) break;
 
+        // parse
         int64_t value;
         auto r = std::from_chars(p, end, value);
         if (r.ec != std::errc()) {
@@ -359,9 +411,8 @@ static size_t parse_dynamic_number_int64(const std::string_view& line, T* number
             break;
         }
 
-        // numbers.push_back(value);
-        *(numbers++) = value;
-        count++;
+        // marching
+        numbers[count++] = value;
         p = r.ptr;
     }
 
@@ -736,7 +787,12 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
     std::vector<int64_t> lineElementCounts;
     lineElementCounts.resize(lines.size());
     ParallelParseElement(lines, maxThreads, [&](const std::string_view& line, size_t i) {
-        auto numElements = counting_dynamic_char(line);
+        size_t numElements = 0;
+        if constexpr (std::is_same<T, char>::value) {
+            numElements = counting_dynamic_char(line);
+        } else if constexpr (std::is_floating_point<T>::value || std::is_integral<T>::value) {
+            numElements = counting_dynamic_number(line);
+        }
         lineElementCounts[i] = static_cast<int64_t>(numElements);
     });
 
@@ -744,10 +800,16 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
     std::vector<int64_t> lineElementOffset(lines.size() + 1, 0);
     std::inclusive_scan(std::execution::par, lineElementCounts.begin(), lineElementCounts.end(), lineElementOffset.begin() + 1);
     ParallelParseElement(lines, maxThreads, [&](const std::string_view& line, size_t i) {
-        auto offset = lineElementOffset[i];
+        const auto offset = lineElementOffset[i];
         T* numbers = &values[offset];
-        parse_dynamic_char(line, numbers);
 
+        if constexpr (std::is_same<T, char>::value) {
+            parse_dynamic_char(line, numbers);
+        } else if constexpr (std::is_floating_point<T>::value) {
+            parse_dynamic_number_float(line, numbers);
+        } else if constexpr (std::is_integral<T>::value) {
+            parse_dynamic_number_int64(line, numbers);
+        }
         // std::cout << "location: line " << i << " parse " << numElements << " elements.\n";        
     });
 
