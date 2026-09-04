@@ -106,6 +106,11 @@ be built separately for each supported operating system and Python version;
 See [docs/publish.md](docs/publish.md) for the complete cibuildwheel and
 TestPyPI Trusted Publishing workflow.
 
+And here is simple operation
+- on github, click action, then choose the workflow to publish
+    - Build and publish to TestPyPI
+    - Build and publish to PyPI
+
 ## limited
 
 - comment only support # now
