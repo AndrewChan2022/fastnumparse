@@ -747,7 +747,7 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
 
     // parse pass
     std::vector<int64_t> lineElementOffset(lines.size() + 1, 0);
-    std::inclusive_scan(std::execution::par, lineElementCounts.begin(), lineElementCounts.end(), lineElementOffset.begin() + 1);
+    std::inclusive_scan(lineElementCounts.begin(), lineElementCounts.end(), lineElementOffset.begin() + 1);
     ParallelParseElement(lines, maxThreads, [&](const std::string_view& line, size_t i) {
         const auto offset = lineElementOffset[i];
         T* numbers = &values[offset];
