@@ -56,6 +56,9 @@ skip = "*-musllinux_*"
 test-command = "pytest {project}/tests"
 test-requires = ["pytest>=8"]
 
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--import-mode=importlib"]
