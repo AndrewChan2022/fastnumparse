@@ -33,6 +33,7 @@ dev = [
     "build>=1.2.2",
     "cibuildwheel>=4.2,<5",
     "mypy>=1.11",
+    "py7zr>=1.0,<2",
     "pytest>=8",
     "twine>=6",
 ]

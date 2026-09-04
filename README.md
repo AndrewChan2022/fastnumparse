@@ -82,8 +82,13 @@ python -m pip install -e ".[dev]"
 This compiles the C++ extension with CMake and pybind11. Run the tests with:
 
 ```console
+python tools/gendata.py
 python -m pytest
 ```
+
+`tools/gendata.py` extracts the compressed test and benchmark datasets from
+`assets/` into the ignored `data/` directory. Pass `--force` to replace files
+that have already been extracted.
 
 ## Build distribution artifacts
 
