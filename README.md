@@ -98,6 +98,9 @@ The source distribution can be uploaded to PyPI directly. Platform wheels must
 be built separately for each supported operating system and Python version;
 `cibuildwheel` is included in the development dependencies for that purpose.
 
+See [docs/publish.md](docs/publish.md) for the complete cibuildwheel and
+TestPyPI Trusted Publishing workflow.
+
 ## limited
 
 - comment only support # now

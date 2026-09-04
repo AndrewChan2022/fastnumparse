@@ -6,7 +6,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "fastnumparse"
-version = "0.1.0"
+version = "0.0.1"
 description = "Fast number parsing for NumPy, powered by C++."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,7 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "build>=1.2.2",
-    "cibuildwheel>=2.21",
+    "cibuildwheel>=4.2,<5",
     "mypy>=1.11",
     "pytest>=8",
     "twine>=6",
@@ -49,6 +49,9 @@ build-dir = "build/{wheel_tag}"
 strict-config = true
 
 [tool.cibuildwheel]
+build = "cp3{10,11,12,13}-*"
+archs = ["auto64"]
+skip = "*-musllinux_*"
 test-command = "pytest {project}/tests"
 test-requires = ["pytest>=8"]
 

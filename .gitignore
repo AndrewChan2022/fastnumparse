@@ -26,5 +26,6 @@ Thumbs.db
 .venv/
 venv/
 /dist
+/wheelhouse/
 *.egg-info/
 /docs/tmp_*
