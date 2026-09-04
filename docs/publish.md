@@ -80,6 +80,10 @@ workflow for Linux and macOS wheels.
 
 ## Configure TestPyPI Trusted Publishing
 
+https://test.pypi.org/manage/account/publishing/
+
+https://pypi.org/manage/account/publishing/
+
 TestPyPI has accounts and project settings separate from production PyPI.
 Create or sign in to the TestPyPI account, then configure a pending or existing
 GitHub Trusted Publisher with these exact values:
