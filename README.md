@@ -97,3 +97,14 @@ python -m twine check dist/*
 The source distribution can be uploaded to PyPI directly. Platform wheels must
 be built separately for each supported operating system and Python version;
 `cibuildwheel` is included in the development dependencies for that purpose.
+
+## limited
+
+- comment only support # now
+- delimiter only support space now
+
+## Acknowledgements
+
+- [nanothread](https://github.com/mitsuba-renderer/nanothread) for light tbb style parallel_for
+- [fast_float](https://github.com/fastfloat/fast_float) for fast string to float
+- [pybind11](https://github.com/pybind/pybind11) for python binding
