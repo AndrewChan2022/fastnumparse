@@ -63,6 +63,11 @@ Build every configured Windows wheel:
 python -m cibuildwheel --platform windows --output-dir wheelhouse .
 ```
 
+Build every configured Linux wheel:
+```bash
+python -m cibuildwheel --platform linux --output-dir wheelhouse .
+```
+
 cibuildwheel builds only wheels. Build the source distribution separately:
 
 ```powershell

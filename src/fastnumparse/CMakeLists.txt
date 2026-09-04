@@ -1,6 +1,6 @@
 pybind11_add_module(
     _fastnumparse
-    SHARED
+    MODULE
     fastnumparse.cpp
 )
 
