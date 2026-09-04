@@ -185,7 +185,10 @@ static void ParallelParseElement(
             parseOneLine(line, i);
         }    
     }, pool.get());
-    std::cout << "block size:" << 1 * 8192 << " maxThreads: " << maxThreads << std::endl;
+
+    if(FNP_VERBOSE) {
+        std::cout << "block size:" << 1 * 8192 << " maxThreads: " << maxThreads << std::endl;
+    }
 }
 
 /// this is 20x faster than std::istringstream method
