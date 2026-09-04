@@ -28,6 +28,7 @@ namespace dr = drjit;
 
 namespace fastnumparse {
 
+constexpr static bool FNP_VERBOSE = true;
 
 /// 10x faster line reader relative to std::getline
 /// 
@@ -613,7 +614,7 @@ static std::pair<py::array, std::size_t> parse_fix_column_buffer_as(
 
     // phase 1: parse to lines
     // phase 2: parse to number
-    bool verbose = true;
+    bool verbose = FNP_VERBOSE;
     auto values = parse_fix_column_buffer_as_vector<T>(
         infile, comment, maxRows, columnCount, maxThreads, verbose);
 
@@ -796,7 +797,7 @@ static std::pair<py::array, std::size_t> parse_dynamic_column_buffer_as(
 ) {
     // phase 1: parse to lines
     // phase 2: parse to number
-    bool verbose = true;
+    bool verbose = FNP_VERBOSE;
     auto values = parse_dynamic_column_buffer_as_vector<T>(
         infile, comment, endChar, nelement, maxThreads, verbose);
 
