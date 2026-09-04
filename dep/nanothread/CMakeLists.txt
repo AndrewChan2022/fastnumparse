@@ -95,7 +95,10 @@ target_include_directories(nanothread
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 target_compile_definitions(nanothread PRIVATE -DNANOTHREAD_BUILD=1)
-set_target_properties(nanothread PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+set_target_properties(nanothread PROPERTIES 
+  POSITION_INDEPENDENT_CODE ON
+  INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
+)
 
 if (NANOTHREAD_ENABLE_TRACE)
   # Activates the NT_TRACE() messages defined in src/queue.h.
