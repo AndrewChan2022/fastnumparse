@@ -263,7 +263,7 @@ def benchmark_noncsv_dataset(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
-    parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--number", type=int, default=1)
     args = parser.parse_args()
