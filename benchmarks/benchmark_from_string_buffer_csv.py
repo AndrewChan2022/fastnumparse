@@ -96,6 +96,7 @@ def benchmark_dataset(
     *,
     repeat: int,
     number: int,
+    verbose: bool,
 ) -> None:
     raw_buffer = dataset.path.read_bytes()
     numpy_text = remove_comments(raw_buffer.decode("ascii"))
@@ -109,6 +110,7 @@ def benchmark_dataset(
             max_rows=dataset.rows,
             column_count=dataset.columns,
             ndmin=2,
+            verbose=verbose,
         )
         return values
 
@@ -154,6 +156,7 @@ def benchmark_dataset(
         max_rows=dataset.rows,
         column_count=dataset.columns,
         ndmin=2,
+        verbose=verbose,
     )
     # fromstring_values = parse_numpy_fromstring()
     loadtxt_textio_values = parse_numpy_loadtxt_textio()
@@ -186,6 +189,7 @@ def benchmark_noncsv_dataset(
     *,
     repeat: int,
     number: int,
+    verbose: bool,
 ) -> None:
     raw_buffer = dataset.path.read_bytes()
     payload = raw_buffer.partition(b"}")[0]
@@ -198,6 +202,7 @@ def benchmark_noncsv_dataset(
             comment="#",
             end_char="}",
             nelement=dataset.elements,
+            verbose=verbose,
         )
         return values
 
@@ -228,6 +233,7 @@ def benchmark_noncsv_dataset(
         comment="#",
         end_char="}",
         nelement=dataset.elements,
+        verbose=verbose,
     )
     numpy_values = parse_numpy()
 
@@ -260,6 +266,7 @@ def main() -> None:
     parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--number", type=int, default=1)
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     fnp.set_max_threads(args.threads)
 
@@ -270,6 +277,7 @@ def main() -> None:
     print(f"threads:      {args.threads} (0 means automatic)")
     print(f"measurements: {args.repeat} repeats x {args.number} calls")
     print("warm-up:      none")
+    print(f"verbose:      {args.verbose}")
     print("notes:        np.fromstring comment removal is outside timing")
     print("              loadtxt TextIO includes opening and reading the file")
     print("              loadtxt BytesIO uses the preloaded buffer")
@@ -280,6 +288,7 @@ def main() -> None:
             dataset,
             repeat=args.repeat,
             number=args.number,
+            verbose=args.verbose,
         )
 
     for dataset in noncsv_datasets:
@@ -287,6 +296,7 @@ def main() -> None:
             dataset,
             repeat=args.repeat,
             number=args.number,
+            verbose=args.verbose,
         )
 
 

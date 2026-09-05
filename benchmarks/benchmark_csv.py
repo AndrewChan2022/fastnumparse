@@ -90,6 +90,7 @@ def benchmark_dataset(
     *,
     repeat: int,
     number: int,
+    verbose: bool,
 ) -> None:
     raw_buffer = dataset.path.read_bytes()
 
@@ -102,6 +103,7 @@ def benchmark_dataset(
             max_rows=dataset.rows,
             column_count=dataset.columns,
             ndmin=2,
+            verbose=verbose,
         )
         return values
 
@@ -116,6 +118,7 @@ def benchmark_dataset(
         max_rows=dataset.rows,
         column_count=dataset.columns,
         ndmin=2,
+        verbose=verbose,
     )
     expected_shape = (dataset.rows, dataset.columns)
     if values.shape != expected_shape:
@@ -141,6 +144,7 @@ def benchmark_noncsv_dataset(
     *,
     repeat: int,
     number: int,
+    verbose: bool,
 ) -> None:
     raw_buffer = dataset.path.read_bytes()
 
@@ -152,7 +156,7 @@ def benchmark_noncsv_dataset(
             comment="#",
             end_char="}",
             nelement=dataset.elements,
-            verbose=False,
+            verbose=verbose,
         )
         return values
 
@@ -166,7 +170,7 @@ def benchmark_noncsv_dataset(
         comment="#",
         end_char="}",
         nelement=dataset.elements,
-        verbose=False,
+        verbose=verbose,
     )
     expected_shape = (dataset.elements,)
     if values.shape != expected_shape:
@@ -193,6 +197,7 @@ def main() -> None:
     parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--number", type=int, default=1)
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     fnp.set_max_threads(args.threads)
 
@@ -203,6 +208,7 @@ def main() -> None:
     print(f"threads:      {args.threads} (0 means automatic)")
     print(f"measurements: {args.repeat} repeats x {args.number} calls")
     print("warm-up:      none")
+    print(f"verbose:      {args.verbose}")
     print()
 
     for dataset in datasets:
@@ -211,6 +217,7 @@ def main() -> None:
             dataset,
             repeat=args.repeat,
             number=args.number,
+            verbose=args.verbose,
         )
 
     for _, dataset in enumerate(noncsv_datasets):
@@ -219,6 +226,7 @@ def main() -> None:
             dataset,
             repeat=args.repeat,
             number=args.number,
+            verbose=args.verbose,
         )
 
 
