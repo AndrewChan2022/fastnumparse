@@ -3,11 +3,6 @@
 
 Fast number parsing for NumPy, powered by C++.
 
-> [!NOTE]
-> This project is in its initial scaffolding stage; the public parsing API has
-> not been defined yet.
-
-
 ## install
 
 
