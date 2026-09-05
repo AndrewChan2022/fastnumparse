@@ -88,7 +88,6 @@ def format_duration(seconds: float) -> str:
 def benchmark_dataset(
     dataset: Dataset,
     *,
-    threads: int,
     repeat: int,
     number: int,
 ) -> None:
@@ -103,7 +102,6 @@ def benchmark_dataset(
             dataset.rows,
             dataset.columns,
             2,
-            threads,
         )
         return values
 
@@ -118,7 +116,6 @@ def benchmark_dataset(
         dataset.rows,
         dataset.columns,
         2,
-        threads,
     )
     expected_shape = (dataset.rows, dataset.columns)
     if values.shape != expected_shape:
@@ -142,7 +139,6 @@ def benchmark_dataset(
 def benchmark_noncsv_dataset(
     dataset: NonCsvDataset,
     *,
-    threads: int,
     repeat: int,
     number: int,
 ) -> None:
@@ -156,7 +152,6 @@ def benchmark_noncsv_dataset(
             "#",
             "}",
             dataset.elements,
-            threads,
         )
         return values
 
@@ -170,7 +165,6 @@ def benchmark_noncsv_dataset(
         "#",
         "}",
         dataset.elements,
-        threads,
     )
     expected_shape = (dataset.elements,)
     if values.shape != expected_shape:
@@ -198,6 +192,7 @@ def main() -> None:
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--number", type=int, default=1)
     args = parser.parse_args()
+    fnp.set_max_threads(args.threads)
 
     datasets = discover_datasets(args.data_dir)
     noncsv_datasets = discover_noncsv_datasets(args.data_dir)
@@ -212,7 +207,6 @@ def main() -> None:
         # if not dataset.path.name.endswith("noncsv_int_244761.txt"): continue
         benchmark_dataset(
             dataset,
-            threads=args.threads,
             repeat=args.repeat,
             number=args.number,
         )
@@ -221,7 +215,6 @@ def main() -> None:
         # if not dataset.path.name.endswith("noncsv_int_244761.txt"): continue
         benchmark_noncsv_dataset(
             dataset,
-            threads=args.threads,
             repeat=args.repeat,
             number=args.number,
         )

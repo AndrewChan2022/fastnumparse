@@ -17,6 +17,17 @@ pip install fastnumparse
 
 ## usage
 
+set parallel thread count:
+
+```pyton
+# max 16 threads
+fnp.set_max_threads(16)
+
+# max threads same as cpu core number
+fnp.set_max_threads(0)
+```
+
+
 
 for csv-like data, with row * col,  with sep=" " and comment ="#"
 
@@ -29,6 +40,8 @@ for csv-like data, with row * col,  with sep=" " and comment ="#"
 ```python
 import fastnumparse as fnp
 
+fnp.set_max_threads(16)
+
 path = "csv_data.txt"
 raw_buffer = open(path, "rb").read()
 values, _ = fnp.from_string_buffer_csv(
@@ -39,7 +52,6 @@ values, _ = fnp.from_string_buffer_csv(
     max_rows = 3,
     column_count=3,
     ndmin=2,            # 2: return 2d array, 0~1: return 1d array
-    max_threads=16,
 )
 ```
 
@@ -56,6 +68,8 @@ for noncsv data, each row unkown number count, with sep=" " and comment ="#", an
 ```python
 import fastnumparse as fnp
 
+fnp.set_max_threads(16)
+
 path = "noncsv_data.txt"
 raw_buffer = open(path, "rb").read()
 values, _ = fnp.from_string_buffer_noncsv(
@@ -65,7 +79,6 @@ values, _ = fnp.from_string_buffer_noncsv(
     comment="#",
     end_char="}",
     nelement=20,
-    max_threads=16,
 )
 ```
 

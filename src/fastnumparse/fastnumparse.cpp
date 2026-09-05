@@ -164,30 +164,34 @@ public:
     SharedThreadPool(const SharedThreadPool&) = delete;
     SharedThreadPool& operator=(const SharedThreadPool&) = delete;
 
+    static SharedThreadPool& shared() {
+        static SharedThreadPool sharedPool;
+        return sharedPool;
+    }
+
+    static Pool* sharedPool() {
+        return shared().getPool();
+    }
+
+    Pool* getPool() {
+        return pool_.get();
+    }
+
     static std::int32_t getMaxThreads() noexcept {
-        return instance().defaultMaxThreads_.load(std::memory_order_relaxed);
+        return shared().defaultMaxThreads_.load(std::memory_order_relaxed);
     }
 
     static void setMaxThreads(std::int32_t maxThreads) {
         const std::int32_t resolvedThreads = maxThreads <= 0
-            ? automaticMaxThreads()
+            ? cpuCoreCount()
             : clampMaxThreads(maxThreads);
 
-        SharedThreadPool& sharedPool = instance();
+        SharedThreadPool& sharedPool = shared();
         std::lock_guard<std::mutex> lock(sharedPool.mutex_);
-        sharedPool.ensurePoolSize(resolvedThreads);
+        pool_set_size(
+            sharedPool.pool_.get(),
+            static_cast<std::uint32_t>(resolvedThreads));
         sharedPool.defaultMaxThreads_.store(resolvedThreads, std::memory_order_relaxed);
-    }
-
-    static std::int32_t resolveMaxThreads(std::int32_t maxThreads) {
-        return maxThreads <= 0 ? getMaxThreads() : clampMaxThreads(maxThreads);
-    }
-
-    static Pool* getPool(std::int32_t maxThreads) {
-        SharedThreadPool& sharedPool = instance();
-        std::lock_guard<std::mutex> lock(sharedPool.mutex_);
-        sharedPool.ensurePoolSize(maxThreads);
-        return sharedPool.pool_.get();
     }
 
 private:
@@ -197,61 +201,40 @@ private:
         }
     };
 
-    SharedThreadPool()
-        : defaultMaxThreads_(clampMaxThreads(16)) {
-    }
-
-    static SharedThreadPool& instance() {
-        static SharedThreadPool sharedPool;
-        return sharedPool;
+    SharedThreadPool() : defaultMaxThreads_(cpuCoreCount()) {
+        pool_.reset(pool_create(static_cast<std::uint32_t>(
+            defaultMaxThreads_.load(std::memory_order_relaxed))));
     }
 
     static std::int32_t cpuCoreCount() {
-        return std::max<std::int32_t>(
-            1, static_cast<std::int32_t>(core_count()));
-    }
-
-    static std::int32_t automaticMaxThreads() {
-        return std::max<std::int32_t>(1, cpuCoreCount() - 1);
+        return std::max<std::int32_t>(1, static_cast<std::int32_t>(core_count()));
     }
 
     static std::int32_t clampMaxThreads(std::int32_t maxThreads) {
         return std::clamp(maxThreads, std::int32_t{1}, cpuCoreCount());
     }
 
-    void ensurePoolSize(std::int32_t maxThreads) {
-        if (!pool_) {
-            pool_.reset(pool_create(static_cast<std::uint32_t>(maxThreads)));
-            poolSize_ = maxThreads;
-        } else if (poolSize_ != maxThreads) {
-            pool_set_size(pool_.get(), static_cast<std::uint32_t>(maxThreads));
-            poolSize_ = maxThreads;
-        }
-    }
-
 private:
     std::atomic<std::int32_t> defaultMaxThreads_;
     std::mutex mutex_;
     std::unique_ptr<Pool, PoolDeleter> pool_;
-    std::int32_t poolSize_ = 0;
 };
 
 
 template <typename ParseOneLineFunc>
 static void ParallelParseElement(
     const std::vector<std::string_view>& lines, 
-    int32_t maxThreads, 
     const ParseOneLineFunc& parseOneLine
 ) {
-    // if maxThread == 0, max cpu core
-    maxThreads = SharedThreadPool::resolveMaxThreads(maxThreads);
-
-    // task count
+    const std::int32_t maxThreads = SharedThreadPool::getMaxThreads();
     const size_t nLines =  lines.size();
+
+    // empty branch
     if (nLines == 0) {
         return;
     }
 
+    // ser branch
     if (maxThreads == 1) {
         for (size_t i = 0; i < nLines; ++i) {
             parseOneLine(lines[i], i);
@@ -259,19 +242,19 @@ static void ParallelParseElement(
         return;
     }
 
+    // par branch
     const size_t targetChunkCount = 8 * static_cast<size_t>(maxThreads);
     const size_t blockSize = std::max<size_t>(1, nLines / targetChunkCount);
 
-    Pool* pool = SharedThreadPool::getPool(maxThreads);
     // dr::blocked_range<size_t> r = dr::blocked_range<size_t>(0, nLines);
     dr::parallel_for(dr::blocked_range<size_t>(0, nLines, blockSize), [&](dr::blocked_range<size_t> r)
     {
         // std::cout << "parse range count: " << (r.end() - r.begin()) << "\n";
         for (size_t i = r.begin(); i != r.end(); ++i) {
-            auto& line = lines[i];
+            const auto& line = lines[i];
             parseOneLine(line, i);
         }    
-    }, pool);
+    }, SharedThreadPool::sharedPool());
 
     if(FNP_VERBOSE) {
         std::cout << "block size:" << blockSize << " maxThreads: " << maxThreads << std::endl;
@@ -592,7 +575,6 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t maxThreads = 16,
     bool verbose = false
 ) {
     const auto totalStart = std::chrono::steady_clock::now();
@@ -623,7 +605,7 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
     // this is 20x faster than std::istringstream method
     // parallel 4x more faster
     // totally 80x faster
-    ParallelParseElement(lines, maxThreads, [&](const std::string_view& inputLine, size_t i) {
+    ParallelParseElement(lines, [&](const std::string_view& inputLine, size_t i) {
         if constexpr (std::is_floating_point<T>::value) {
             // std::array<double, 16> numbers;
             // auto ret = parse_fix_number_floats(inputLine, numbers.data(), numbers.size());
@@ -695,8 +677,7 @@ static std::pair<py::array, std::size_t> parse_fix_column_buffer_as(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t ndmin = 0,
-    std::int32_t maxThreads = 16
+    std::int32_t ndmin = 0
 ) {
     if (ndmin < 0 || ndmin > 2) {
         throw py::value_error("ndmin must be 0, 1, or 2");
@@ -706,7 +687,7 @@ static std::pair<py::array, std::size_t> parse_fix_column_buffer_as(
     // phase 2: parse to number
     bool verbose = FNP_VERBOSE;
     auto values = parse_fix_column_buffer_as_vector<T>(
-        infile, comment, maxRows, columnCount, maxThreads, verbose);
+        infile, comment, maxRows, columnCount, verbose);
 
     // phase 3: convert to np.array
     std::vector<py::ssize_t> shape;
@@ -735,8 +716,7 @@ std::pair<py::array, std::size_t> from_string_buffer_csv(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t ndmin,
-    std::int32_t maxThreads = 16
+    std::int32_t ndmin
 ) {
     const py::buffer_info info = input.request();
 
@@ -765,22 +745,22 @@ std::pair<py::array, std::size_t> from_string_buffer_csv(
 
     if (dtype.is(py::dtype::of<double>())) {
         return parse_fix_column_buffer_as<double>(
-            reader, comment, maxRows, columnCount, ndmin, maxThreads);
+            reader, comment, maxRows, columnCount, ndmin);
     }
 
     if (dtype.is(py::dtype::of<float>())) {
         return parse_fix_column_buffer_as<float>(
-            reader, comment, maxRows, columnCount, ndmin, maxThreads);
+            reader, comment, maxRows, columnCount, ndmin);
     }
 
     if (dtype.is(py::dtype::of<std::int64_t>())) {
         return parse_fix_column_buffer_as<std::int64_t>(
-            reader, comment, maxRows, columnCount, ndmin, maxThreads);
+            reader, comment, maxRows, columnCount, ndmin);
     }
 
     if (dtype.is(py::dtype::of<std::int32_t>())) {
         return parse_fix_column_buffer_as<std::int32_t>(
-            reader, comment, maxRows, columnCount, ndmin, maxThreads);
+            reader, comment, maxRows, columnCount, ndmin);
     }
 
     throw py::type_error("unsupported dtype");
@@ -792,7 +772,6 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
     const std::string& comment,
     std::string endChar, // 
     std::size_t nelement,
-    std::int32_t maxThreads = 16,
     bool verbose = false
 ) {
 
@@ -825,7 +804,7 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
     // counting pass
     std::vector<int64_t> lineElementCounts;
     lineElementCounts.resize(lines.size());
-    ParallelParseElement(lines, maxThreads, [&](const std::string_view& line, size_t i) {
+    ParallelParseElement(lines, [&](const std::string_view& line, size_t i) {
         size_t numElements = 0;
         if constexpr (std::is_same<T, char>::value) {
             numElements = counting_dynamic_char(line);
@@ -839,7 +818,7 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
     // parse pass
     std::vector<int64_t> lineElementOffset(lines.size() + 1, 0);
     std::inclusive_scan(lineElementCounts.begin(), lineElementCounts.end(), lineElementOffset.begin() + 1);
-    ParallelParseElement(lines, maxThreads, [&](const std::string_view& line, size_t i) {
+    ParallelParseElement(lines, [&](const std::string_view& line, size_t i) {
         const auto offset = lineElementOffset[i];
         T* numbers = &values[offset];
 
@@ -882,14 +861,13 @@ static std::pair<py::array, std::size_t> parse_dynamic_column_buffer_as(
     FastLineReader& infile,
     const std::string& comment,
     std::string endChar, // 
-    std::size_t nelement,
-    std::int32_t maxThreads = 16
+    std::size_t nelement
 ) {
     // phase 1: parse to lines
     // phase 2: parse to number
     bool verbose = FNP_VERBOSE;
     auto values = parse_dynamic_column_buffer_as_vector<T>(
-        infile, comment, endChar, nelement, maxThreads, verbose);
+        infile, comment, endChar, nelement, verbose);
 
     // phase 3: convert to np.array
     std::vector<py::ssize_t> shape;
@@ -914,8 +892,7 @@ std::pair<py::array, std::size_t> from_string_buffer_noncsv(
     py::object dtypeArg,
     const std::string& comment,
     std::string endChar, // 
-    std::size_t nelement,
-    std::int32_t maxThreads = 16
+    std::size_t nelement
 ) {
     const py::buffer_info info = input.request();
 
@@ -941,27 +918,27 @@ std::pair<py::array, std::size_t> from_string_buffer_noncsv(
 
     if (dtype.is(py::dtype::of<char>())) {
         return parse_dynamic_column_buffer_as<char>(
-            reader, comment, endChar, nelement, maxThreads);
+            reader, comment, endChar, nelement);
     }
 
     if (dtype.is(py::dtype::of<double>())) {
         return parse_dynamic_column_buffer_as<double>(
-            reader, comment, endChar, nelement, maxThreads);
+            reader, comment, endChar, nelement);
     }
 
     if (dtype.is(py::dtype::of<float>())) {
         return parse_dynamic_column_buffer_as<float>(
-            reader, comment, endChar, nelement, maxThreads);
+            reader, comment, endChar, nelement);
     }
 
     if (dtype.is(py::dtype::of<std::int64_t>())) {
         return parse_dynamic_column_buffer_as<std::int64_t>(
-            reader, comment, endChar, nelement, maxThreads);
+            reader, comment, endChar, nelement);
     }
 
     if (dtype.is(py::dtype::of<std::int32_t>())) {
         return parse_dynamic_column_buffer_as<std::int32_t>(
-            reader, comment, endChar, nelement, maxThreads);
+            reader, comment, endChar, nelement);
     }
 
     throw py::type_error("unsupported dtype");
@@ -978,7 +955,6 @@ std::vector<T> from_file_csv(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t maxThreads,
     bool verbose
 ) {
     // TODO: comment must be '#'
@@ -999,26 +975,24 @@ std::vector<T> from_file_csv(
     }
 
     auto values = parse_fix_column_buffer_as_vector<T>(
-        infile, comment, maxRows, columnCount, maxThreads, verbose);
+        infile, comment, maxRows, columnCount, verbose);
     return values;
 }
 
 template FAST_NUM_PARSE_API std::vector<double> from_file_csv<double>(
-    const std::string&,
-    const std::string&,
-    std::size_t,
-    std::size_t,
-    std::int32_t,
-    bool
+    const std::string& file,
+    const std::string& comment,
+    std::size_t maxRows,
+    std::size_t columnCount,
+    bool verbose
 );
 
 template FAST_NUM_PARSE_API std::vector<std::int64_t> from_file_csv<std::int64_t>(
-    const std::string&,
-    const std::string&,
-    std::size_t,
-    std::size_t,
-    std::int32_t,
-    bool
+    const std::string& file,
+    const std::string& comment,
+    std::size_t maxRows,
+    std::size_t columnCount,
+    bool verbose
 );
 
 
@@ -1034,7 +1008,6 @@ std::vector<T> from_file_noncsv(
     const std::string& comment,
     std::string endChar, // 
     std::size_t nelement,
-    std::int32_t maxThreads,
     bool verbose
 ) {
     // TODO: comment must be '#'
@@ -1055,7 +1028,7 @@ std::vector<T> from_file_noncsv(
     }
 
     auto values = parse_dynamic_column_buffer_as_vector<T>(
-        infile, comment, endChar, nelement, maxThreads, verbose);
+        infile, comment, endChar, nelement, verbose);
     return values;
 }
 
@@ -1064,7 +1037,6 @@ template FAST_NUM_PARSE_API std::vector<double> from_file_noncsv(
     const std::string& comment,
     std::string endChar, // 
     std::size_t nelement,
-    std::int32_t maxThreads,
     bool verbose
 );
 
@@ -1073,7 +1045,6 @@ template FAST_NUM_PARSE_API std::vector<int64_t> from_file_noncsv(
     const std::string& comment,
     std::string endChar, // 
     std::size_t nelement,
-    std::int32_t maxThreads,
     bool verbose
 );
 
@@ -1082,7 +1053,6 @@ template FAST_NUM_PARSE_API std::vector<char> from_file_noncsv(
     const std::string& comment,
     std::string endChar,
     std::size_t nelement,
-    std::int32_t maxThreads,
     bool verbose
 );
 
@@ -1121,7 +1091,6 @@ PYBIND11_MODULE(_fastnumparse, module) {
         py::arg("max_rows"),
         py::arg("column_count"),
         py::arg("ndmin"),
-        py::arg("max_threads") = 16,
         "Parse csv like data from string buffer, fix rows and column, space delimeter and # comment."
     );
 
@@ -1134,7 +1103,6 @@ PYBIND11_MODULE(_fastnumparse, module) {
         py::arg("comment"),
         py::arg("end_char"),
         py::arg("nelement"),
-        py::arg("max_threads") = 16,
         "Parse non-CSV data with a known total element count from a string buffer, parse line until meet end char."
     );
 }

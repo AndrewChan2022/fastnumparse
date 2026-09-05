@@ -19,7 +19,7 @@ bool test_csv(
 ) {
     const auto start = std::chrono::steady_clock::now();
     const std::vector<T> values = fastnumparse::from_file_csv<T>(
-        file.string(), "#", rows, columns, 16, true);
+        file.string(), "#", rows, columns, true);
     const auto end = std::chrono::steady_clock::now();
 
     const double seconds = std::chrono::duration<double>(end - start).count();
@@ -49,7 +49,7 @@ bool test_noncsv_char(
 ) {
     const auto start = std::chrono::steady_clock::now();
     const std::vector<char> values = fastnumparse::from_file_noncsv<char>(
-        file.string(), "#", "}", elementCount, 16, true);
+        file.string(), "#", "}", elementCount, true);
     const auto end = std::chrono::steady_clock::now();
 
     if (values.size() != elementCount) {
@@ -78,7 +78,7 @@ bool test_noncsv_int(
     const auto start = std::chrono::steady_clock::now();
     const std::vector<std::int64_t> values =
         fastnumparse::from_file_noncsv<std::int64_t>(
-            file.string(), "#", "}", elementCount, 16, true);
+            file.string(), "#", "}", elementCount, true);
     const auto end = std::chrono::steady_clock::now();
 
     if (values.size() != elementCount) {
