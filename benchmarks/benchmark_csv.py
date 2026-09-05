@@ -152,7 +152,7 @@ def benchmark_noncsv_dataset(
             comment="#",
             end_char="}",
             nelement=dataset.elements,
-            verbose=True,
+            verbose=False,
         )
         return values
 
@@ -166,7 +166,7 @@ def benchmark_noncsv_dataset(
         comment="#",
         end_char="}",
         nelement=dataset.elements,
-        verbose=True,
+        verbose=False,
     )
     expected_shape = (dataset.elements,)
     if values.shape != expected_shape:

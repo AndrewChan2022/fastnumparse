@@ -30,6 +30,10 @@ namespace dr = drjit;
 
 namespace fastnumparse {
 
+static constexpr bool is_ascii_space(unsigned char c) noexcept {
+    return c == ' ' || (c >= '\t' && c <= '\r');
+}
+
 
 /// 10x faster line reader relative to std::getline
 /// 
@@ -243,8 +247,12 @@ static void ParallelParseElement(
     }
 
     // par branch
-    const size_t targetChunkCount = 8 * static_cast<size_t>(maxThreads);
-    const size_t blockSize = std::max<size_t>(1, nLines / targetChunkCount);
+    constexpr size_t minLinesPerChunk = 3000;
+    const size_t targetChunkCount = std::min(
+        static_cast<size_t>(maxThreads),
+        std::max<size_t>(1, nLines / minLinesPerChunk));
+    const size_t blockSize =
+        (nLines + targetChunkCount - 1) / targetChunkCount;
 
     // dr::blocked_range<size_t> r = dr::blocked_range<size_t>(0, nLines);
     dr::parallel_for(dr::blocked_range<size_t>(0, nLines, blockSize), [&](dr::blocked_range<size_t> r)
@@ -275,12 +283,12 @@ static size_t parse_fix_number_floats(const std::string_view& line, T* numbers, 
     }
 
     // trim leading spaces
-    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+    while (begin < end && is_ascii_space(static_cast<unsigned char>(*begin))) {
         ++begin;
     }
 
     // trim trailing spaces
-    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+    while (end > begin && is_ascii_space(static_cast<unsigned char>(end[-1]))) {
         --end;
     }
 
@@ -289,7 +297,7 @@ static size_t parse_fix_number_floats(const std::string_view& line, T* numbers, 
 
     while (p < end && count < capacity) {
         // skip spaces between tokens
-        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+        while (p < end && is_ascii_space(static_cast<unsigned char>(*p))) {
             ++p;
         }
 
@@ -321,12 +329,12 @@ static size_t parse_fix_number_int64(const std::string_view& line, T* numbers, s
     }
 
     // trim leading spaces
-    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+    while (begin < end && is_ascii_space(static_cast<unsigned char>(*begin))) {
         ++begin;
     }
 
     // trim trailing spaces
-    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+    while (end > begin && is_ascii_space(static_cast<unsigned char>(end[-1]))) {
         --end;
     }
 
@@ -335,7 +343,7 @@ static size_t parse_fix_number_int64(const std::string_view& line, T* numbers, s
 
     while (p < end && count < capacity) {
         // skip whitespace
-        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+        while (p < end && is_ascii_space(static_cast<unsigned char>(*p))) {
             ++p;
         }
 
@@ -369,12 +377,12 @@ static size_t counting_dynamic_number(const std::string_view& line) {
     }
 
     // trim leading spaces
-    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+    while (begin < end && is_ascii_space(static_cast<unsigned char>(*begin))) {
         ++begin;
     }
 
     // trim trailing spaces
-    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+    while (end > begin && is_ascii_space(static_cast<unsigned char>(end[-1]))) {
         --end;
     }
 
@@ -385,7 +393,7 @@ static size_t counting_dynamic_number(const std::string_view& line) {
     for (const char* p = begin; p < end; ++p) {
         unsigned char c = static_cast<unsigned char>(*p);
 
-        if (std::isspace(c)) {
+        if (is_ascii_space(c)) {
             in_token = false;
         } else {
             // only count when entering a new token
@@ -410,12 +418,12 @@ static size_t parse_dynamic_number_float(const std::string_view& line, T* number
     }
 
     // trim leading spaces
-    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+    while (begin < end && is_ascii_space(static_cast<unsigned char>(*begin))) {
         ++begin;
     }
 
     // trim trailing spaces
-    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+    while (end > begin && is_ascii_space(static_cast<unsigned char>(end[-1]))) {
         --end;
     }
 
@@ -424,7 +432,7 @@ static size_t parse_dynamic_number_float(const std::string_view& line, T* number
 
     while (p < end) {
         // skip whitespace
-        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+        while (p < end && is_ascii_space(static_cast<unsigned char>(*p))) {
             ++p;
         }
 
@@ -457,12 +465,12 @@ static size_t parse_dynamic_number_int64(const std::string_view& line, T* number
     }
 
     // trim leading spaces
-    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+    while (begin < end && is_ascii_space(static_cast<unsigned char>(*begin))) {
         ++begin;
     }
 
     // trim trailing spaces
-    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+    while (end > begin && is_ascii_space(static_cast<unsigned char>(end[-1]))) {
         --end;
     }
 
@@ -471,7 +479,7 @@ static size_t parse_dynamic_number_int64(const std::string_view& line, T* number
 
     while (p < end) {
         // skip whitespace
-        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+        while (p < end && is_ascii_space(static_cast<unsigned char>(*p))) {
             ++p;
         }
 
@@ -506,12 +514,12 @@ static size_t counting_dynamic_char(const std::string_view& line) {
     }
 
     // trim leading spaces
-    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+    while (begin < end && is_ascii_space(static_cast<unsigned char>(*begin))) {
         ++begin;
     }
 
     // trim trailing spaces
-    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+    while (end > begin && is_ascii_space(static_cast<unsigned char>(end[-1]))) {
         --end;
     }
 
@@ -519,7 +527,7 @@ static size_t counting_dynamic_char(const std::string_view& line) {
     size_t count = 0;
     for (const char* p = begin; p < end; ++p) {
         unsigned char c = static_cast<unsigned char>(*p);
-        if (std::isspace(c)) {
+        if (is_ascii_space(c)) {
         } else {
             ++count;      // new token starts
         }
@@ -539,12 +547,12 @@ static size_t parse_dynamic_char(const std::string_view& line, char* numbers) {
     }
 
     // trim leading spaces
-    while (begin < end && std::isspace(static_cast<unsigned char>(*begin))) {
+    while (begin < end && is_ascii_space(static_cast<unsigned char>(*begin))) {
         ++begin;
     }
 
     // trim trailing spaces
-    while (end > begin && std::isspace(static_cast<unsigned char>(end[-1]))) {
+    while (end > begin && is_ascii_space(static_cast<unsigned char>(end[-1]))) {
         --end;
     }
 
@@ -553,7 +561,7 @@ static size_t parse_dynamic_char(const std::string_view& line, char* numbers) {
     
     while (p < end) {
         // skip whitespace
-        while (p < end && std::isspace(static_cast<unsigned char>(*p))) {
+        while (p < end && is_ascii_space(static_cast<unsigned char>(*p))) {
             ++p;
         }
 

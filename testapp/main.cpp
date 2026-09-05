@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -73,18 +74,28 @@ bool test_noncsv_char(
 
 bool test_noncsv_int(
     const fs::path& file,
-    std::size_t elementCount
+    std::size_t elementCount,
+    std::int64_t expectedSum
 ) {
     const auto start = std::chrono::steady_clock::now();
     const std::vector<std::int64_t> values =
         fastnumparse::from_file_noncsv<std::int64_t>(
-            file.string(), "#", "}", elementCount, true);
+            file.string(), "#", "}", elementCount, false);
     const auto end = std::chrono::steady_clock::now();
 
     if (values.size() != elementCount) {
         std::cerr << file.filename().string()
                   << ": expected " << elementCount
                   << " values, got " << values.size() << '\n';
+        return false;
+    }
+
+    const std::int64_t sum = std::accumulate(
+        values.begin(), values.end(), std::int64_t{0});
+    if (sum != expectedSum) {
+        std::cerr << file.filename().string()
+                  << ": expected sum " << expectedSum
+                  << ", got " << sum << '\n';
         return false;
     }
 
@@ -111,7 +122,7 @@ int main(int argc, char* argv[]) {
     passed &= test_noncsv_char(
         dataDir / "noncsv_char_2854577.txt", 2854577);
     passed &= test_noncsv_int(
-        dataDir / "noncsv_int_244761.txt", 244761);
+        dataDir / "noncsv_int_244761.txt", 244761, 174008065804);
 
     return passed ? 0 : 1;
 }
