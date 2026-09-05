@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15...4.4)
 
 set(FASTNUMPARSE_PROJECT_NAME "fastnumparse")
-set(FASTNUMPARSE_PROJECT_VERSION "0.1.0")
+set(FASTNUMPARSE_PROJECT_VERSION "0.2.0")
 
 # scikit-build-core defines these variables when building a Python package.
 # Keep standalone CMake configuration usable for IDEs and local development.

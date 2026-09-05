@@ -5,6 +5,7 @@ Fast number parsing for NumPy, powered by C++.
 
 ## install
 
+requires-python = ">=3.10,<3.15"
 
 ```bash
 pip install fastnumparse
