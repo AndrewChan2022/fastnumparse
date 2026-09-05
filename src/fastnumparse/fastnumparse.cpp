@@ -367,7 +367,7 @@ static size_t parse_fix_number_int64(const std::string_view& line, T* numbers, s
 
 
 // after remove tailing # comment,  each connected token is counted as one
-static size_t counting_dynamic_number(const std::string_view& line) {
+static size_t counting_dynamic_number_multipass(const std::string_view& line) {
     const char* begin = line.data();
     const char* end   = begin + line.size();
 
@@ -401,6 +401,26 @@ static size_t counting_dynamic_number(const std::string_view& line) {
                 ++count;      // new token starts
                 in_token = true;
             }
+        }
+    }
+
+    return count;
+}
+
+static size_t counting_dynamic_number(const std::string_view& line) {
+    size_t count = 0;
+    bool inToken = false;
+
+    for (unsigned char c : line) {
+        if (c == '#') {
+            break;
+        }
+
+        if (is_ascii_space(c)) {
+            inToken = false;
+        } else if (!inToken) {
+            ++count;
+            inToken = true;
         }
     }
 
