@@ -2,6 +2,10 @@ import numpy as np
 
 def _native_version() -> str: ...
 
+def get_max_threads() -> int: ...
+
+def set_max_threads(max_threads: int) -> None: ...
+
 def from_string_buffer_csv(
     input: object,
     offset: int,
@@ -10,7 +14,6 @@ def from_string_buffer_csv(
     max_rows: int,
     column_count: int,
     ndmin: int,
-    max_threads: int = 16,
 ) -> tuple[np.ndarray, int]: ...
 
 def from_string_buffer_noncsv(
@@ -20,5 +23,4 @@ def from_string_buffer_noncsv(
     comment: str,
     end_char: str,
     nelement: int,
-    max_threads: int = 16,
 ) -> tuple[np.ndarray, int]: ...
