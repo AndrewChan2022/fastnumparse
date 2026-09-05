@@ -7,12 +7,14 @@
 #include "fastnumparse.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -157,6 +159,83 @@ private:
     std::streamsize file_size_ = 0;
 };
 
+class SharedThreadPool {
+public:
+    SharedThreadPool(const SharedThreadPool&) = delete;
+    SharedThreadPool& operator=(const SharedThreadPool&) = delete;
+
+    static std::int32_t getMaxThreads() noexcept {
+        return instance().defaultMaxThreads_.load(std::memory_order_relaxed);
+    }
+
+    static void setMaxThreads(std::int32_t maxThreads) {
+        const std::int32_t resolvedThreads = maxThreads <= 0
+            ? automaticMaxThreads()
+            : clampMaxThreads(maxThreads);
+
+        SharedThreadPool& sharedPool = instance();
+        std::lock_guard<std::mutex> lock(sharedPool.mutex_);
+        sharedPool.ensurePoolSize(resolvedThreads);
+        sharedPool.defaultMaxThreads_.store(resolvedThreads, std::memory_order_relaxed);
+    }
+
+    static std::int32_t resolveMaxThreads(std::int32_t maxThreads) {
+        return maxThreads <= 0 ? getMaxThreads() : clampMaxThreads(maxThreads);
+    }
+
+    static Pool* getPool(std::int32_t maxThreads) {
+        SharedThreadPool& sharedPool = instance();
+        std::lock_guard<std::mutex> lock(sharedPool.mutex_);
+        sharedPool.ensurePoolSize(maxThreads);
+        return sharedPool.pool_.get();
+    }
+
+private:
+    struct PoolDeleter {
+        void operator()(Pool* pool) const noexcept {
+            pool_destroy(pool);
+        }
+    };
+
+    SharedThreadPool()
+        : defaultMaxThreads_(clampMaxThreads(16)) {
+    }
+
+    static SharedThreadPool& instance() {
+        static SharedThreadPool sharedPool;
+        return sharedPool;
+    }
+
+    static std::int32_t cpuCoreCount() {
+        return std::max<std::int32_t>(
+            1, static_cast<std::int32_t>(core_count()));
+    }
+
+    static std::int32_t automaticMaxThreads() {
+        return std::max<std::int32_t>(1, cpuCoreCount() - 1);
+    }
+
+    static std::int32_t clampMaxThreads(std::int32_t maxThreads) {
+        return std::clamp(maxThreads, std::int32_t{1}, cpuCoreCount());
+    }
+
+    void ensurePoolSize(std::int32_t maxThreads) {
+        if (!pool_) {
+            pool_.reset(pool_create(static_cast<std::uint32_t>(maxThreads)));
+            poolSize_ = maxThreads;
+        } else if (poolSize_ != maxThreads) {
+            pool_set_size(pool_.get(), static_cast<std::uint32_t>(maxThreads));
+            poolSize_ = maxThreads;
+        }
+    }
+
+private:
+    std::atomic<std::int32_t> defaultMaxThreads_;
+    std::mutex mutex_;
+    std::unique_ptr<Pool, PoolDeleter> pool_;
+    std::int32_t poolSize_ = 0;
+};
+
 
 template <typename ParseOneLineFunc>
 static void ParallelParseElement(
@@ -165,29 +244,37 @@ static void ParallelParseElement(
     const ParseOneLineFunc& parseOneLine
 ) {
     // if maxThread == 0, max cpu core
-    const int32_t cores = static_cast<int32_t>(core_count());
-    maxThreads = maxThreads <= 0 ? cores - 1 : maxThreads;
-    maxThreads = std::clamp(maxThreads, 1, cores);
-    std::unique_ptr<Pool, decltype(&pool_destroy)> pool(
-        pool_create(static_cast<uint32_t>(maxThreads)),
-        &pool_destroy
-    );
+    maxThreads = SharedThreadPool::resolveMaxThreads(maxThreads);
 
     // task count
     const size_t nLines =  lines.size();
+    if (nLines == 0) {
+        return;
+    }
 
+    if (maxThreads == 1) {
+        for (size_t i = 0; i < nLines; ++i) {
+            parseOneLine(lines[i], i);
+        }
+        return;
+    }
+
+    const size_t targetChunkCount = 8 * static_cast<size_t>(maxThreads);
+    const size_t blockSize = std::max<size_t>(1, nLines / targetChunkCount);
+
+    Pool* pool = SharedThreadPool::getPool(maxThreads);
     // dr::blocked_range<size_t> r = dr::blocked_range<size_t>(0, nLines);
-    dr::parallel_for(dr::blocked_range<size_t>(0, nLines, 1 * 8192), [&](dr::blocked_range<size_t> r)
+    dr::parallel_for(dr::blocked_range<size_t>(0, nLines, blockSize), [&](dr::blocked_range<size_t> r)
     {
         // std::cout << "parse range count: " << (r.end() - r.begin()) << "\n";
         for (size_t i = r.begin(); i != r.end(); ++i) {
             auto& line = lines[i];
             parseOneLine(line, i);
         }    
-    }, pool.get());
+    }, pool);
 
     if(FNP_VERBOSE) {
-        std::cout << "block size:" << 1 * 8192 << " maxThreads: " << maxThreads << std::endl;
+        std::cout << "block size:" << blockSize << " maxThreads: " << maxThreads << std::endl;
     }
 }
 
@@ -1009,6 +1096,19 @@ PYBIND11_MODULE(_fastnumparse, module) {
         "_native_version",
         []() { return FASTNUMPARSE_VERSION; },
         "Return the version compiled into the native extension."
+    );
+
+    module.def(
+        "get_max_threads",
+        &fastnumparse::SharedThreadPool::getMaxThreads,
+        "Return the shared default maximum thread count."
+    );
+
+    module.def(
+        "set_max_threads",
+        &fastnumparse::SharedThreadPool::setMaxThreads,
+        py::arg("max_threads"),
+        "Set the shared default maximum thread count. Values <= 0 restore the automatic default."
     );
 
     module.def(

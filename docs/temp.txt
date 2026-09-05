@@ -1,0 +1,30 @@
+change src\fastnumparse\fastnumparse.cpp
+
+add such features:
+
+I. we need a shared persistent pool and shared default max_threads
+
+create on first parallel_for call, 
+or user explicityly set max_threads interface.
+we need add this interface and bind to python, then expose to user. 
+
+we also need record such max threadx, if user not specify max_threads, we use it.
+if user specify max_threads, we use user number, 
+
+to avoid recreate pool with diff number,  we just always create pool with cpu_core number?
+
+
+II. adaptive chunk 
+
+according task count and max_threads,
+we need each chunk to be task_count / (8 * max_threads),
+
+nanothreads may not have steal feature, 
+so we divide task a little fine grain, so avoid one chunk take too long time.
+
+
+III. one threads fallback 
+
+if one threads, 
+ParallelParseElement not use parallel_for, just use naive for
+
