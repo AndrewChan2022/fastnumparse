@@ -247,10 +247,10 @@ static void ParallelParseElement(
     }
 
     // par branch
-    constexpr size_t minLinesPerChunk = 3000;
+    constexpr size_t chunksPerThread = 4;
     const size_t targetChunkCount = std::min(
-        static_cast<size_t>(maxThreads),
-        std::max<size_t>(1, nLines / minLinesPerChunk));
+        nLines,
+        chunksPerThread * static_cast<size_t>(maxThreads));
     const size_t blockSize =
         (nLines + targetChunkCount - 1) / targetChunkCount;
 
