@@ -223,6 +223,7 @@ private:
 template <typename ParseOneLineFunc>
 static void ParallelParseElement(
     const std::vector<std::string_view>& lines, 
+    bool verbose,
     const ParseOneLineFunc& parseOneLine
 ) {
     const std::int32_t maxThreads = SharedThreadPool::getMaxThreads();
@@ -255,7 +256,7 @@ static void ParallelParseElement(
         }    
     }, SharedThreadPool::sharedPool());
 
-    if(FNP_VERBOSE) {
+    if(verbose) {
         std::cout << "block size:" << blockSize << " maxThreads: " << maxThreads << std::endl;
     }
 }
@@ -604,7 +605,7 @@ static std::vector<T> parse_fix_column_buffer_as_vector(
     // this is 20x faster than std::istringstream method
     // parallel 4x more faster
     // totally 80x faster
-    ParallelParseElement(lines, [&](const std::string_view& inputLine, size_t i) {
+    ParallelParseElement(lines, verbose, [&](const std::string_view& inputLine, size_t i) {
         if constexpr (std::is_floating_point<T>::value) {
             // std::array<double, 16> numbers;
             // auto ret = parse_fix_number_floats(inputLine, numbers.data(), numbers.size());
@@ -804,7 +805,7 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
     // counting pass
     std::vector<int64_t> lineElementCounts;
     lineElementCounts.resize(lines.size());
-    ParallelParseElement(lines, [&](const std::string_view& line, size_t i) {
+    ParallelParseElement(lines, verbose, [&](const std::string_view& line, size_t i) {
         size_t numElements = 0;
         if constexpr (std::is_same<T, char>::value) {
             numElements = counting_dynamic_char(line);
@@ -818,7 +819,7 @@ static std::vector<T> parse_dynamic_column_buffer_as_vector(
     // parse pass
     std::vector<int64_t> lineElementOffset(lines.size() + 1, 0);
     std::inclusive_scan(lineElementCounts.begin(), lineElementCounts.end(), lineElementOffset.begin() + 1);
-    ParallelParseElement(lines, [&](const std::string_view& line, size_t i) {
+    ParallelParseElement(lines, verbose, [&](const std::string_view& line, size_t i) {
         const auto offset = lineElementOffset[i];
         T* numbers = &values[offset];
 
