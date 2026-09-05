@@ -103,12 +103,12 @@ def benchmark_dataset(
     def parse_fastnumparse() -> np.ndarray:
         values, _ = fnp.from_string_buffer_csv(
             raw_buffer,
-            0,
-            dataset.dtype,
-            "#",
-            dataset.rows,
-            dataset.columns,
-            2,
+            offset=0,
+            dtype=dataset.dtype,
+            comment="#",
+            max_rows=dataset.rows,
+            column_count=dataset.columns,
+            ndmin=2,
         )
         return values
 
@@ -148,12 +148,12 @@ def benchmark_dataset(
 
     fast_values, next_offset = fnp.from_string_buffer_csv(
         raw_buffer,
-        0,
-        dataset.dtype,
-        "#",
-        dataset.rows,
-        dataset.columns,
-        2,
+        offset=0,
+        dtype=dataset.dtype,
+        comment="#",
+        max_rows=dataset.rows,
+        column_count=dataset.columns,
+        ndmin=2,
     )
     # fromstring_values = parse_numpy_fromstring()
     loadtxt_textio_values = parse_numpy_loadtxt_textio()
@@ -193,11 +193,11 @@ def benchmark_noncsv_dataset(
     def parse_fastnumparse() -> np.ndarray:
         values, _ = fnp.from_string_buffer_noncsv(
             raw_buffer,
-            0,
-            dataset.dtype,
-            "#",
-            "}",
-            dataset.elements,
+            offset=0,
+            dtype=dataset.dtype,
+            comment="#",
+            end_char="}",
+            nelement=dataset.elements,
         )
         return values
 
@@ -223,11 +223,11 @@ def benchmark_noncsv_dataset(
 
     fast_values, next_offset = fnp.from_string_buffer_noncsv(
         raw_buffer,
-        0,
-        dataset.dtype,
-        "#",
-        "}",
-        dataset.elements,
+        offset=0,
+        dtype=dataset.dtype,
+        comment="#",
+        end_char="}",
+        nelement=dataset.elements,
     )
     numpy_values = parse_numpy()
 
