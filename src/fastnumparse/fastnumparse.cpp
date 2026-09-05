@@ -30,7 +30,6 @@ namespace dr = drjit;
 
 namespace fastnumparse {
 
-constexpr static bool FNP_VERBOSE = true;
 
 /// 10x faster line reader relative to std::getline
 /// 
@@ -677,7 +676,8 @@ static std::pair<py::array, std::size_t> parse_fix_column_buffer_as(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t ndmin = 0
+    std::int32_t ndmin,
+    bool verbose
 ) {
     if (ndmin < 0 || ndmin > 2) {
         throw py::value_error("ndmin must be 0, 1, or 2");
@@ -685,7 +685,6 @@ static std::pair<py::array, std::size_t> parse_fix_column_buffer_as(
 
     // phase 1: parse to lines
     // phase 2: parse to number
-    bool verbose = FNP_VERBOSE;
     auto values = parse_fix_column_buffer_as_vector<T>(
         infile, comment, maxRows, columnCount, verbose);
 
@@ -716,7 +715,8 @@ std::pair<py::array, std::size_t> from_string_buffer_csv(
     const std::string& comment,
     std::size_t maxRows,
     std::size_t columnCount,
-    std::int32_t ndmin
+    std::int32_t ndmin,
+    bool verbose = false
 ) {
     const py::buffer_info info = input.request();
 
@@ -745,22 +745,22 @@ std::pair<py::array, std::size_t> from_string_buffer_csv(
 
     if (dtype.is(py::dtype::of<double>())) {
         return parse_fix_column_buffer_as<double>(
-            reader, comment, maxRows, columnCount, ndmin);
+            reader, comment, maxRows, columnCount, ndmin, verbose);
     }
 
     if (dtype.is(py::dtype::of<float>())) {
         return parse_fix_column_buffer_as<float>(
-            reader, comment, maxRows, columnCount, ndmin);
+            reader, comment, maxRows, columnCount, ndmin, verbose);
     }
 
     if (dtype.is(py::dtype::of<std::int64_t>())) {
         return parse_fix_column_buffer_as<std::int64_t>(
-            reader, comment, maxRows, columnCount, ndmin);
+            reader, comment, maxRows, columnCount, ndmin, verbose);
     }
 
     if (dtype.is(py::dtype::of<std::int32_t>())) {
         return parse_fix_column_buffer_as<std::int32_t>(
-            reader, comment, maxRows, columnCount, ndmin);
+            reader, comment, maxRows, columnCount, ndmin, verbose);
     }
 
     throw py::type_error("unsupported dtype");
@@ -861,11 +861,11 @@ static std::pair<py::array, std::size_t> parse_dynamic_column_buffer_as(
     FastLineReader& infile,
     const std::string& comment,
     std::string endChar, // 
-    std::size_t nelement
+    std::size_t nelement,
+    bool verbose
 ) {
     // phase 1: parse to lines
     // phase 2: parse to number
-    bool verbose = FNP_VERBOSE;
     auto values = parse_dynamic_column_buffer_as_vector<T>(
         infile, comment, endChar, nelement, verbose);
 
@@ -892,7 +892,8 @@ std::pair<py::array, std::size_t> from_string_buffer_noncsv(
     py::object dtypeArg,
     const std::string& comment,
     std::string endChar, // 
-    std::size_t nelement
+    std::size_t nelement,
+    bool verbose = false
 ) {
     const py::buffer_info info = input.request();
 
@@ -918,27 +919,27 @@ std::pair<py::array, std::size_t> from_string_buffer_noncsv(
 
     if (dtype.is(py::dtype::of<char>())) {
         return parse_dynamic_column_buffer_as<char>(
-            reader, comment, endChar, nelement);
+            reader, comment, endChar, nelement, verbose);
     }
 
     if (dtype.is(py::dtype::of<double>())) {
         return parse_dynamic_column_buffer_as<double>(
-            reader, comment, endChar, nelement);
+            reader, comment, endChar, nelement, verbose);
     }
 
     if (dtype.is(py::dtype::of<float>())) {
         return parse_dynamic_column_buffer_as<float>(
-            reader, comment, endChar, nelement);
+            reader, comment, endChar, nelement, verbose);
     }
 
     if (dtype.is(py::dtype::of<std::int64_t>())) {
         return parse_dynamic_column_buffer_as<std::int64_t>(
-            reader, comment, endChar, nelement);
+            reader, comment, endChar, nelement, verbose);
     }
 
     if (dtype.is(py::dtype::of<std::int32_t>())) {
         return parse_dynamic_column_buffer_as<std::int32_t>(
-            reader, comment, endChar, nelement);
+            reader, comment, endChar, nelement, verbose);
     }
 
     throw py::type_error("unsupported dtype");
@@ -1091,6 +1092,7 @@ PYBIND11_MODULE(_fastnumparse, module) {
         py::arg("max_rows"),
         py::arg("column_count"),
         py::arg("ndmin"),
+        py::arg("verbose") = false,
         "Parse csv like data from string buffer, fix rows and column, space delimeter and # comment."
     );
 
@@ -1103,6 +1105,7 @@ PYBIND11_MODULE(_fastnumparse, module) {
         py::arg("comment"),
         py::arg("end_char"),
         py::arg("nelement"),
+        py::arg("verbose") = false,
         "Parse non-CSV data with a known total element count from a string buffer, parse line until meet end char."
     );
 }

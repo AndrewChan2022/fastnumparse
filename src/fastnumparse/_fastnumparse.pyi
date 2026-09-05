@@ -14,6 +14,7 @@ def from_string_buffer_csv(
     max_rows: int,
     column_count: int,
     ndmin: int,
+    verbose: bool = False,
 ) -> tuple[np.ndarray, int]: ...
 
 def from_string_buffer_noncsv(
@@ -23,4 +24,5 @@ def from_string_buffer_noncsv(
     comment: str,
     end_char: str,
     nelement: int,
+    verbose: bool = False,
 ) -> tuple[np.ndarray, int]: ...
