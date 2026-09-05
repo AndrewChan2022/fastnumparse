@@ -12,16 +12,15 @@ the same project version and filename already exists.
 ## Supported wheel targets
 
 The cibuildwheel settings are stored in `pyproject.toml`. The initial release
-builds 64-bit CPython 3.10 through 3.13 wheels for:
+builds 64-bit CPython 3.10 through 3.14 wheels for:
 
 - Linux manylinux x86-64
 - Windows AMD64
 - macOS Intel x86-64
 - macOS Apple Silicon ARM64
 
-musllinux wheels are skipped. Python 3.14 wheels should be enabled after the
-vendored pybind11 is upgraded from 2.13.6 to a version that officially supports
-Python 3.14 and the project tests pass with that interpreter.
+musllinux wheels are skipped. Python 3.15 is still a prerelease and is not part
+of the supported wheel matrix.
 
 ## Versioning
 
